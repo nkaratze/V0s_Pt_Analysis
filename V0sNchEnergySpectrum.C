@@ -46,18 +46,14 @@ void V0sNchEnergySpectrum(){
     std::vector<double>* nchCentBinsKaons   = &pthistos::centBinsK0sh;
     std::vector<double>* nchCentBinsLambdas = &pthistos::centBinsLambda;
 
-    // ============================================================
-    // FILES
-    // ============================================================
+    //AO2D Files to be accessed configuqration
     InitAO2DFiles();
 
     //Getting Nch information
     TFile* dataFile  = new TFile(AO2DFiles.datarootpath.c_str());
     TFile* mcFile    = new TFile(AO2DFiles.mcrootpath.c_str());
     TFile* mcGenFile = new TFile(AO2DFiles.mcgenrootpath.c_str());
-
-    //Getting already calculated histos    
-    TFile* processedFile  = new TFile("V0s_Pt_Spectrum_Cent_13.6_TeV.root", "READ");
+    TFile* processedFile = new TFile(AO2DFiles.processedrootpath.c_str());
 
     // ============================================================
     // LOAD REAL DATA
@@ -121,80 +117,86 @@ void V0sNchEnergySpectrum(){
 
 
 
-    ////DEBUGGING START
+    TGraph* gNchMatrixMean = new TGraph();
+    TGraph* gNchMatrix = new TGraph();
+
+    for (int ic = 1; ic <= hNchGenMC->GetNbinsX(); ++ic) {
+
+        // Nch distribution for this centrality bin
+        TH1D* hGen  = hNchGenMC ->ProjectionY(Form("hGen_%d",ic),  ic, ic);
+        TH1D* hReco = hNchRecoMC->ProjectionY(Form("hReco_%d",ic), ic, ic);
+
+        double meanGen  = hGen->GetMean();
+        double meanReco = hReco->GetMean();
+
+        gNchMatrixMean->SetPoint(ic-1, meanGen, meanReco);
+
+        std::cout << "Cent bin " << ic
+                << "  Gen=" << meanGen
+                << "  Reco=" << meanReco
+                << std::endl;
+
+        delete hGen;
+        delete hReco;
+    }
+
+
+    gNchMatrixMean->SetTitle("Gen <N_{ch}>/Reco <N_{ch}>");
+    gNchMatrixMean->SetMarkerStyle(20);
+    gNchMatrixMean->SetMarkerSize(1.2);
+
+
+
+    // ============================================================
+    // Nch EFFICIENCY
+    // ============================================================
+
+
+
+    auto& cbins = *nchCentBinsKaons;
+
+    TH1D* hRecoGenRatio = new TH1D("hRecoGenRatio",";Centrality (%);N_{ch} Efficiency",cbins.size()-1,cbins.data());
+
+    for (size_t i = 0; i < cbins.size()-1; ++i) {
+
+        double cmin = cbins[i];
+        double cmax = cbins[i+1];
+
+        int binLo = hNchGenMC->GetXaxis()->FindBin(cmin + 1e-6);
+        int binHi = hNchGenMC->GetXaxis()->FindBin(cmax - 1e-6);
+
+        TH1D* hGen  = hNchGenMC ->ProjectionY(Form("hGen_%zu",i),  binLo, binHi);
+        TH1D* hReco = hNchRecoMC->ProjectionY(Form("hReco_%zu",i), binLo, binHi);
+
+        double meanGen  = hGen->GetMean();
+        double meanReco = hReco->GetMean();
+
+        double ratio = (meanGen > 0.) ? meanReco/meanGen : 0.;
+
+        hRecoGenRatio->SetBinContent(i+1, ratio);
+
+        delete hGen;
+        delete hReco;
+    }
+
+    
+    hRecoGenRatio->SetLineColor(kBlue+1);
+    hRecoGenRatio->SetLineWidth(2);
+
+    hRecoGenRatio->GetXaxis()->SetTitleSize(0.05);
+    hRecoGenRatio->GetYaxis()->SetTitleSize(0.05);
+    hRecoGenRatio->GetXaxis()->SetLabelSize(0.045);
+    hRecoGenRatio->GetYaxis()->SetLabelSize(0.045);
+    hRecoGenRatio->GetYaxis()->SetTitleOffset(1.1);
+
+    hRecoGenRatio->SetStats(0);
+    hRecoGenRatio->Draw("PE");
 
 
 
 
 
-TGraph* gNchMatrixMean = new TGraph();
-TGraph* gNchMatrix = new TGraph();
 
-for (int ic = 1; ic <= hNchGenMC->GetNbinsX(); ++ic) {
-
-    // Nch distribution for this centrality bin
-    TH1D* hGen  = hNchGenMC ->ProjectionY(Form("hGen_%d",ic),  ic, ic);
-    TH1D* hReco = hNchRecoMC->ProjectionY(Form("hReco_%d",ic), ic, ic);
-
-    double meanGen  = hGen->GetMean();
-    double meanReco = hReco->GetMean();
-
-    gNchMatrixMean->SetPoint(ic-1, meanGen, meanReco);
-
-    std::cout << "Cent bin " << ic
-              << "  Gen=" << meanGen
-              << "  Reco=" << meanReco
-              << std::endl;
-
-    delete hGen;
-    delete hReco;
-}
-
-
-gNchMatrixMean->SetTitle("Gen <N_{ch}>/Reco <N_{ch}>");
-gNchMatrixMean->SetMarkerStyle(20);
-gNchMatrixMean->SetMarkerSize(1.2);
-
-
-
-
-
-
-
-auto& cbins = *nchCentBinsKaons;
-
-TH1D* hRecoGenRatio = new TH1D("hRecoGenRatio",";Centrality (%);Reco/Gen",cbins.size()-1,cbins.data());
-
-for (size_t i = 0; i < cbins.size()-1; ++i) {
-
-    double cmin = cbins[i];
-    double cmax = cbins[i+1];
-
-    int binLo = hNchGenMC->GetXaxis()->FindBin(cmin + 1e-6);
-    int binHi = hNchGenMC->GetXaxis()->FindBin(cmax - 1e-6);
-
-    TH1D* hGen  = hNchGenMC ->ProjectionY(Form("hGen_%zu",i),  binLo, binHi);
-    TH1D* hReco = hNchRecoMC->ProjectionY(Form("hReco_%zu",i), binLo, binHi);
-
-    double meanGen  = hGen->GetMean();
-    double meanReco = hReco->GetMean();
-
-    double ratio = (meanGen > 0.) ? meanReco/meanGen : 0.;
-
-    hRecoGenRatio->SetBinContent(i+1, ratio);
-
-    delete hGen;
-    delete hReco;
-}
-
-hRecoGenRatio->Draw("HIST");
-
-
-
-
-
-
-    ////DEBUGGING END
 
 
 
@@ -208,7 +210,7 @@ hRecoGenRatio->Draw("HIST");
     std::cout << "\nSummary:\n" << "Ratio > 1      : " << nRatioAboveOne << '\n' << "0 < Ratio < 1  : " << nRatioBetweenZeroAndOne << '\n' << "Ratio == 1     : " << nRatioEqualOne << '\n'<< "Ratio = -999   : " << nRatioMinus999 << '\n';
 
     // ============================================================
-    // EVENT EFFICIENCY AND SPLITTING (ALREADY CALCULATED)
+    // GET EVENT EFFICIENCY AND SPLITTING (ALREADY CALCULATED)
     // ============================================================
 
     std::vector<double> eventEfficiencyKaonBins, eventEfficiencyLambdaBins;
@@ -266,7 +268,7 @@ hRecoGenRatio->Draw("HIST");
             double nev        = hNRecEventsKaon->GetBinContent(i);
             double eventEff   = eventEfficiencyKaonBins[i-1];
             double eventSplit = eventSplittingKaonBins[i-1];
-            double eventWeight = (eventEff * eventSplit) / nev;
+            double eventWeight = (eventEff * eventSplit) / (nev);
 
             std::cout << "Bin " << i << "  nev = " << nev<< "  eventEff = " << eventEff << "  eventSplit = " << eventSplit << "  eventWeight = " << eventWeight << std::endl;
 
@@ -285,9 +287,15 @@ hRecoGenRatio->Draw("HIST");
                 std::cout << "Corrected Value" << "Bin [" << i << "," << j<< "]" << "  v = " << v<< "  e = " << e << std::endl;
             }
         }
+        
         pNchK0sh = hNchCorrectedKaonBins->ProfileX("pNchK0sh");
-
         hNchK0shBins = pNchK0sh->ProjectionX("hNchK0shBins");
+
+        hNchK0shBins->SetMarkerColor(kOrange+1);
+        hNchK0shBins->SetMarkerSize(5.0);
+        hNchK0shBins->SetLineColor(kOrange+1);
+        hNchK0shBins->GetYaxis()->SetTitle("<N_{ch}>");
+        hNchK0shBins->GetXaxis()->SetTitle("Centrality (%)");
 
         for (int i = 1; i <= hNchK0shBins->GetNbinsX(); ++i) {
             double nchBefore = hNchK0shBins->GetBinContent(i);
@@ -324,7 +332,7 @@ hRecoGenRatio->Draw("HIST");
             double nev        = hNRecEventsLambda->GetBinContent(i);
             double eventEff   = eventEfficiencyLambdaBins[i-1];
             double eventSplit = eventSplittingLambdaBins[i-1];
-            double eventWeight = (eventEff * eventSplit) / nev;
+            double eventWeight = (eventEff * eventSplit * 0.5) / (nev * 0.8);
 
             std::cout << "Bin " << i << "  nev = " << nev<< "  eventEff = " << eventEff << "  eventSplit = " << eventSplit << "  eventWeight = " << eventWeight << std::endl;
 
@@ -410,12 +418,16 @@ hRecoGenRatio->Draw("HIST");
     TCanvas* cLambdaAntiLambdaCentrality = new TCanvas("cLambdaAntiLambdaCentrality", "Lambda+Antilambda Centrality", 800, 600);
 
     TH1D* hK0shYieldCent = nullptr;
-    TH1D* hK0shExtrapFrac = new TH1D("hK0shExtrapFrac","K^{0}_{S} Extrapolation Fraction vs Centrality;Centrality (%);Fraction",nchCentBinsKaons->size() - 1,nchCentBinsKaons->data());
+    TH1D* hK0shExtrapFrac = new TH1D("hK0shExtrapFrac","K^{0}_{S} Extrapolation Fraction vs Centrality;Centrality (%);Extrapolated Fraction of Total Yield",nchCentBinsKaons->size() - 1,nchCentBinsKaons->data());
+    TH1D* hK0shMeanPtCent = new TH1D("hK0shMeanPtCent","K^{0}_{S} <p_{T}> vs Centrality;Centrality (%);<p_{T}> (GeV/c)",nchCentBinsKaons->size()-1,nchCentBinsKaons->data());
     TH1D* hLambdaAntiLambdaYieldCent = nullptr;
-    TH1D* hLambdaAntiLambdaExtrapFrac = new TH1D("hLambdaAntiLambdaExtrapFrac","Lambda+Antilambda Extrapolation Fraction vs Centrality;Centrality (%);Fraction",nchCentBinsLambdas->size() - 1,nchCentBinsLambdas->data());
+    TH1D* hLambdaAntiLambdaExtrapFrac = new TH1D("hLambdaAntiLambdaExtrapFrac","Lambda+Antilambda Extrapolation Fraction vs Centrality;Centrality (%);Extrapolated Fraction of Total Yield",nchCentBinsLambdas->size() - 1,nchCentBinsLambdas->data());
+    TH1D* hLambdaAntiLambdaMeanPtCent = new TH1D("hLambdaAntiLambdaMeanPtCent", "Lambda+Antilambda <p_{T}> vs Centrality;Centrality (%);<p_{T}> (GeV/c)", nchCentBinsLambdas->size()-1, nchCentBinsLambdas->data());
 
     TGraph* gK0shNch = nullptr;
+    TGraph* gK0shMeanPtNch = nullptr;
     TGraph* gLambdaAntiLambdaNch = nullptr;
+    TGraph* gLambdaAntiLambdaMeanPtNch = nullptr;
 
     std::map<std::string, TF1*> fitMapK0sh;
     std::map<std::string, TF1*> fitMapLambdaAntiLambda;
@@ -458,9 +470,7 @@ hRecoGenRatio->Draw("HIST");
                 std::cout << "FIT key: " << key << std::endl;
             }
         }
-        TH1D* hK0shYieldCent = new TH1D("hK0shYieldCent","K^{0}_{S} Yield vs Centrality;Centrality (%);Integral",nchCentBinsKaons->size() - 1,nchCentBinsKaons->data());
-        //TIter next(cK0shPtSpectra->GetListOfPrimitives());
-        //TObject* obj = nullptr;
+        TH1D* hK0shYieldCent = new TH1D("hK0shYieldCent","K^{0}_{S} Average Yield vs Centrality;Centrality (%);Total AverageYield",nchCentBinsKaons->size() - 1,nchCentBinsKaons->data());
         std::vector<TString> centKeysK0sh = {"0_1","1_5","5_10","10_15","15_20","20_30","30_40","40_50","50_70","70_100"};
 
         for (auto& [key, hPtSpectra] : hMapK0sh) {
@@ -476,19 +486,42 @@ hRecoGenRatio->Draw("HIST");
             double yield_measured = hPtSpectra->Integral("width");
 
             double pT_min = 0.0;
-            double pT_max = 15.0;
+            double pT_max = 6.5;
 
             double yield_low = 0.0;
             double yield_high = 0.0;
 
             if (fLevyTsallis) {
                 yield_low  = fLevyTsallis->Integral(0.0, pT_min);
-                yield_high = fLevyTsallis->Integral(pT_max, 30.0); //LevyTsallis only goes up to 14 GeV/c currently
+                yield_high = fLevyTsallis->Integral(pT_max, 30.0); //LevyTsallis only goes up to 14 GeV/c currently, 6.5 for ppref
             }
             double yield_extrap = yield_low + yield_high;
             double yield_total  = yield_measured + yield_extrap;
             double frac_extrap = (yield_total > 0) ? yield_extrap / yield_total : 0.0;
+
+
+            // ---------- <pT> numerator from measured region ----------
+            double ptMeasured = 0.0;
+
+            for (int ib = 1; ib <= hPtSpectra->GetNbinsX(); ++ib) {
+
+                double pt    = hPtSpectra->GetBinCenter(ib);
+                double value = hPtSpectra->GetBinContent(ib);
+                double width = hPtSpectra->GetBinWidth(ib);
+
+                ptMeasured += pt * value * width;
+            }
+
+            double ptLow  = 0.0;
+            double ptHigh = 0.0;
+
+            TF1 fPtWeight("fPtWeight",[&](double *x, double *) {return x[0] * fLevyTsallis->Eval(x[0]);},0.,30.,0);
+            ptLow  = fPtWeight.Integral(0.0, pT_min);
+            ptHigh = fPtWeight.Integral(pT_max, 30.0);
             
+            double ptNumerator = ptMeasured + ptLow + ptHigh;
+            double ptMean = ptNumerator / yield_total;
+
             auto pos = std::find(centKeysK0sh.begin(), centKeysK0sh.end(), key);
 
             if (pos == centKeysK0sh.end())
@@ -498,6 +531,7 @@ hRecoGenRatio->Draw("HIST");
 
             hK0shYieldCent->SetBinContent(iCent, yield_total);
             hK0shExtrapFrac->SetBinContent(iCent, frac_extrap);
+            hK0shMeanPtCent->SetBinContent(iCent, ptMean);
 
             if(yield_total > 0) {
                 std::cout << "Centrality Bin " << iCent << "  Measured Yield = " << yield_measured << "  Extrapolated Yield = " << yield_extrap << "  Total Yield = " << yield_total << std::endl;
@@ -507,17 +541,30 @@ hRecoGenRatio->Draw("HIST");
             }
             ++iCent;
         }
-        TCanvas* cK0shYield = new TCanvas("cK0shYield","Yield vs Centrality",800, 600);
+        TCanvas* cK0shYield = new TCanvas("cK0shYield","K^{0}_{S} Average Yield vs Centrality",800, 600);
         cK0shYield->Divide(1,2);
         cK0shYield->cd(1);
-        hK0shYieldCent->SetMarkerStyle(kFullCircle);
+        hK0shYieldCent->SetMarkerStyle(kFullDiamond);
         hK0shYieldCent->SetMarkerSize(1.2);
+        hK0shYieldCent->SetMarkerColor(kBlue+1);
+        hK0shYieldCent->SetLineColor(kBlue+1);
         hK0shYieldCent->Draw("P");
         cK0shYield->cd(2);
-        hK0shExtrapFrac->SetMarkerStyle(kFullCircle);
+        hK0shExtrapFrac->SetMarkerStyle(kFullTriangleUp);
         hK0shExtrapFrac->SetMarkerSize(1.2);
+        hK0shExtrapFrac->SetMarkerColor(kBlue+1);
+        hK0shExtrapFrac->SetLineColor(kBlue+1);
         hK0shExtrapFrac->Draw("P");
         cK0shYield->Write();
+
+        TCanvas* cK0shMeanPt = new TCanvas("cK0shMeanPt","K^{0}_{S} Average Mean Pt vs Centrality",800, 600);
+        cK0shMeanPt->cd();
+        hK0shMeanPtCent->SetMarkerStyle(kFullDiamond);
+        hK0shMeanPtCent->SetMarkerSize(1.2);
+        hK0shMeanPtCent->SetMarkerColor(kBlue+1);
+        hK0shMeanPtCent->SetLineColor(kBlue+1);
+        hK0shMeanPtCent->Draw("P");
+        cK0shMeanPt->Write();
 
         if(pNchK0sh->GetNbinsX() == hK0shYieldCent->GetNbinsX()){
             int nBins = hK0shYieldCent->GetNbinsX();
@@ -535,7 +582,7 @@ hRecoGenRatio->Draw("HIST");
             }
 
             gK0shNch =new TGraph(x.size(),x.data(), y.data());
-
+            gK0shNch->SetName("gK0shNch");
             gK0shNch->SetTitle("K^{0}_{S} Yield vs N_{ch};N_{ch};Yield");
             gK0shNch->SetMarkerStyle(kFullCircle);
 
@@ -543,6 +590,19 @@ hRecoGenRatio->Draw("HIST");
             gK0shNch->Draw("AP");
             gK0shNch->Write();
 
+            std::vector<double> xMeanPt;
+            std::vector<double> yMeanPt;
+
+            for(int i=1;i<=hK0shMeanPtCent->GetNbinsX();i++){
+                xMeanPt.push_back(hNchK0shBins->GetBinContent(i));
+                yMeanPt.push_back(hK0shMeanPtCent->GetBinContent(i));
+            }
+
+            gK0shMeanPtNch = new TGraph(xMeanPt.size(),xMeanPt.data(),yMeanPt.data());
+            gK0shMeanPtNch->SetTitle("K^{0}_{S} <p_{T}> vs N_{ch};N_{ch};<p_{T}> (GeV/c)");
+            gK0shMeanPtNch->SetName("gK0shMeanPtNch");
+            gK0shMeanPtNch->SetMarkerStyle(kFullCircle);
+            gK0shMeanPtNch->Write();
         }
         else {
             std::cerr << "Error: pNchK0sh and hK0shYieldCent have different number of bins!" << std::endl;
@@ -593,7 +653,7 @@ hRecoGenRatio->Draw("HIST");
             }
         }
 
-        TH1D* hLambdaAntiLambdaYieldCent = new TH1D("hLambdaAntiLambdaYieldCent","#Lambda + #bar{#Lambda} Yield vs Centrality;Centrality (%);Integral",nchCentBinsLambdas->size() - 1,nchCentBinsLambdas->data());
+        TH1D* hLambdaAntiLambdaYieldCent = new TH1D("hLambdaAntiLambdaYieldCent","#Lambda + #bar{#Lambda} Average Yield vs Centrality;Centrality (%);Total Average Yield",nchCentBinsLambdas->size() - 1,nchCentBinsLambdas->data());
         //TIter next(cK0shPtSpectra->GetListOfPrimitives());
         //TObject* obj = nullptr;
         std::vector<TString> centKeysLambdaAntiLambda ={"0","1","2","3","4","5","6","7","8","9"};
@@ -610,19 +670,46 @@ hRecoGenRatio->Draw("HIST");
             double yield_measured = hPtSpectra->Integral("width");
 
             double pT_min = 0.5;
-            double pT_max = 10.0;
+            double pT_max = 6.5;
 
             double yield_low = 0.0;
             double yield_high = 0.0;
 
-            if (fLevyTsallis) {
-                yield_low  = fLevyTsallis->Integral(0.0, pT_min);
-                yield_high = fLevyTsallis->Integral(pT_max, 30.0); //LevyTsallis only goes up to 14 GeV/c currently
+            double ptMeasured = 0.0;
+            double ptLow  = 0.0;
+            double ptHigh = 0.0;
+
+            for (int ib = 1; ib <= hPtSpectra->GetNbinsX(); ++ib) {
+
+                double pt = hPtSpectra->GetBinCenter(ib);
+                double value = hPtSpectra->GetBinContent(ib);
+                double width = hPtSpectra->GetBinWidth(ib);
+
+                ptMeasured += pt * value * width;
             }
+
+
+            if (fLevyTsallis) {
+
+                // Yield extrapolation
+                yield_low  = fLevyTsallis->Integral(0.0, pT_min);
+                yield_high = fLevyTsallis->Integral(pT_max, 30.0);
+
+                // pT-weighted extrapolation
+                TF1 fPtWeight("fPtWeight",[&](double *x, double *) {return x[0] * fLevyTsallis->Eval(x[0]);},0.0, 30.0, 0);
+
+                ptLow  = fPtWeight.Integral(0.0, pT_min);
+                ptHigh = fPtWeight.Integral(pT_max, 30.0);
+            }
+
             double yield_extrap = yield_low + yield_high;
             double yield_total  = yield_measured + yield_extrap;
             double frac_extrap = (yield_total > 0) ? yield_extrap / yield_total : 0.0;
-            
+
+            double ptNumerator = ptMeasured + ptLow + ptHigh;
+            cout<< "ptMeasured = " << ptMeasured << "  ptLow = " << ptLow << "  ptHigh = " << ptHigh << std::endl;
+            double meanPt = ptNumerator / yield_total;
+
             auto pos = std::find(centKeysLambdaAntiLambda.begin(), centKeysLambdaAntiLambda.end(), key);
 
             if (pos == centKeysLambdaAntiLambda.end())
@@ -632,6 +719,7 @@ hRecoGenRatio->Draw("HIST");
 
             hLambdaAntiLambdaYieldCent->SetBinContent(iCent, yield_total);
             hLambdaAntiLambdaExtrapFrac->SetBinContent(iCent, frac_extrap);
+            hLambdaAntiLambdaMeanPtCent->SetBinContent(iCent, meanPt);
 
             if(yield_total > 0) {
                 std::cout << "Centrality Bin " << iCent << "  Measured Yield = " << yield_measured << "  Extrapolated Yield = " << yield_extrap << "  Total Yield = " << yield_total << std::endl;
@@ -642,17 +730,44 @@ hRecoGenRatio->Draw("HIST");
             ++iCent;
         }
         
-        TCanvas* cLambdaAntiLambdaYield = new TCanvas("cLambdaAntiLambdaYield","Yield vs Centrality",800, 600);
+        std::vector<double> xMeanPtLambda;
+        std::vector<double> yMeanPtLambda;
+
+        for (int i = 1; i <= hLambdaAntiLambdaMeanPtCent->GetNbinsX(); i++) {
+            xMeanPtLambda.push_back(hNchLambdaAntiLambdaBins->GetBinContent(i));
+            yMeanPtLambda.push_back(hLambdaAntiLambdaMeanPtCent->GetBinContent(i));
+        }
+
+        gLambdaAntiLambdaMeanPtNch = new TGraph(xMeanPtLambda.size(),xMeanPtLambda.data(),yMeanPtLambda.data());
+        gLambdaAntiLambdaMeanPtNch->SetTitle("#Lambda+#bar{#Lambda} <p_{T}> vs N_{ch};N_{ch};<p_{T}> (GeV/c)");
+        gLambdaAntiLambdaMeanPtNch->SetMarkerStyle(kFullSquare);
+        gLambdaAntiLambdaMeanPtNch->SetName("gLambdaAntiLambdaMeanPtNch");
+        gLambdaAntiLambdaMeanPtNch->Write();
+
+        TCanvas* cLambdaAntiLambdaYield = new TCanvas("cLambdaAntiLambdaYield","#Lambda + #bar{#Lambda} Average Yield vs Centrality",800, 600);
         cLambdaAntiLambdaYield->Divide(1,2);
         cLambdaAntiLambdaYield->cd(1);
-        hLambdaAntiLambdaYieldCent->SetMarkerStyle(kFullCircle);
+        hLambdaAntiLambdaYieldCent->SetMarkerStyle(kFullDiamond);
         hLambdaAntiLambdaYieldCent->SetMarkerSize(1.2);
+        hLambdaAntiLambdaYieldCent->SetMarkerColor(kRed+1);
+        hLambdaAntiLambdaYieldCent->SetLineColor(kRed+1);
         hLambdaAntiLambdaYieldCent->Draw("P");
         cLambdaAntiLambdaYield->cd(2);
-        hLambdaAntiLambdaExtrapFrac->SetMarkerStyle(kFullCircle);
+        hLambdaAntiLambdaExtrapFrac->SetMarkerStyle(kFullTriangleUp);
         hLambdaAntiLambdaExtrapFrac->SetMarkerSize(1.2);
+        hLambdaAntiLambdaExtrapFrac->SetMarkerColor(kRed+1);
+        hLambdaAntiLambdaExtrapFrac->SetLineColor(kRed+1);
         hLambdaAntiLambdaExtrapFrac->Draw("P");
         cLambdaAntiLambdaYield->Write();
+
+        TCanvas* cLambdaAntiLambdaMeanPt = new TCanvas("cLambdaAntiLambdaMeanPt","#Lambda + #bar{#Lambda} Average Mean Pt vs Centrality",800, 600);
+        cLambdaAntiLambdaMeanPt->cd();
+        hLambdaAntiLambdaMeanPtCent->SetMarkerStyle(kFullDiamond);
+        hLambdaAntiLambdaMeanPtCent->SetMarkerSize(1.2);
+        hLambdaAntiLambdaMeanPtCent->SetMarkerColor(kRed+1);
+        hLambdaAntiLambdaMeanPtCent->SetLineColor(kRed+1);
+        hLambdaAntiLambdaMeanPtCent->Draw("P");
+        cLambdaAntiLambdaMeanPt->Write();
 
         if(hNchLambdaAntiLambdaBins->GetNbinsX() == hLambdaAntiLambdaYieldCent->GetNbinsX()){
             int nBins = hLambdaAntiLambdaYieldCent->GetNbinsX();
@@ -671,12 +786,14 @@ hRecoGenRatio->Draw("HIST");
 
             gLambdaAntiLambdaNch =new TGraph(x.size(),x.data(), y.data());
 
-            gLambdaAntiLambdaNch->SetTitle("#Lambda + #bar{#Lambda} Yield vs N_{ch};N_{ch};Yield");
+            gLambdaAntiLambdaNch->SetTitle("#Lambda + #bar{#Lambda} Average Yield vs N_{ch};N_{ch};Average Yield");
+            gLambdaAntiLambdaNch->SetName("gLambdaAntiLambdaNch");
             gLambdaAntiLambdaNch->SetMarkerStyle(kFullCircle);
 
             TCanvas* c = new TCanvas("cLambdaAntiLambdaYieldVsNch","",800,600);
             gLambdaAntiLambdaNch->Draw("AP");
             gLambdaAntiLambdaNch->Write();
+
 
         }
         else {
@@ -684,6 +801,82 @@ hRecoGenRatio->Draw("HIST");
         }
     }
 
+    // For MC Closure Test (Alpha Test)
+    TH1D* hNchGeneratedBins = new TH1D("hNchGeneratedBins","Generated <N_{ch}> vs Centrality;Centrality (%);<N_{ch}>",nchCentBinsKaons->size()-1,nchCentBinsKaons->data());
+    auto& cbinsNch = *nchCentBinsKaons;
+
+    for (size_t i = 0; i < cbinsNch.size()-1; ++i){
+
+        double cmin = cbinsNch[i];
+        double cmax = cbinsNch[i+1];
+
+        int binLo = hNchGenMC->GetXaxis()->FindBin(cmin + 1e-6);
+        int binHi = hNchGenMC->GetXaxis()->FindBin(cmax - 1e-6);
+
+        TH1D* hGen = hNchGenMC->ProjectionY(Form("hGeneratedNch_%zu",i),binLo,binHi);
+
+        double meanGen = hGen->GetMean();
+        hNchGeneratedBins->SetBinContent(i+1, meanGen);
+
+        std::cout << "Centrality bin " << i+1<< " Generated <Nch> = "<< meanGen << std::endl;
+
+        delete hGen;
+    }
+
+    TCanvas* cCompareGeneratedCorrectedNch =new TCanvas("cMCClosureTestdNch","cMCClosureTestdNch",800,600);
+    cCompareGeneratedCorrectedNch->Divide(1,2);
+
+    // TOP PAD: Generated vs Corrected
+
+    TPad* padTop = (TPad*)cCompareGeneratedCorrectedNch->cd(1);
+    padTop->SetPad(0,0.30,1,1);
+    padTop->SetBottomMargin(0.02);
+
+    hNchGeneratedBins->SetMarkerStyle(kFullCircle);
+    hNchGeneratedBins->SetMarkerSize(1.2);
+    hNchGeneratedBins->SetMarkerColor(kBlue);
+    hNchGeneratedBins->SetLineColor(kBlue);
+
+    hNchK0shBins->SetMarkerStyle(kFullSquare);
+    hNchK0shBins->SetMarkerSize(1.2);
+    hNchK0shBins->SetMarkerColor(kRed);
+    hNchK0shBins->SetLineColor(kRed);
+
+    hNchGeneratedBins->SetTitle(";Centrality (%);<N_{ch}>");
+    hNchGeneratedBins->Draw("P");
+    hNchK0shBins->Draw("P SAME");
+
+
+    TLegend* legNchCompare =new TLegend(0.55,0.70,0.85,0.85);
+    legNchCompare->AddEntry(hNchGeneratedBins,"Generated <N_{ch}> MC","p");
+    legNchCompare->AddEntry(hNchK0shBins,"Corrected  <N_{ch}> Data","p");
+    legNchCompare->Draw();
+
+    // BOTTOM PAD: Ratio
+
+    TPad* padBottom = (TPad*)cCompareGeneratedCorrectedNch->cd(2);
+    padBottom->SetPad(0,0,1,0.30);
+    padBottom->SetTopMargin(0.02);
+    padBottom->SetBottomMargin(0.30);
+
+
+    TH1D* hNchCorrectionRatio = (TH1D*)hNchK0shBins->Clone("hNchCorrectionRatio");
+    hNchCorrectionRatio->Divide(hNchGeneratedBins);
+    hNchCorrectionRatio->SetTitle(";Centrality (%);Corrected / Generated");
+    hNchCorrectionRatio->SetMarkerStyle(kFullCircle);
+    hNchCorrectionRatio->SetMarkerSize(1.0);
+    hNchCorrectionRatio->GetYaxis()->SetRangeUser(0.8,1.2);
+    hNchCorrectionRatio->GetYaxis()->SetNdivisions(505);
+    hNchCorrectionRatio->Draw("P");
+
+    // Optional: draw unity line
+    TLine* unity = new TLine(hNchCorrectionRatio->GetXaxis()->GetXmin(),1.0,hNchCorrectionRatio->GetXaxis()->GetXmax(),1.0);
+    unity->SetLineStyle(2);
+    unity->Draw("SAME");
+
+    cCompareGeneratedCorrectedNch->Write();
+
+    // Finished MC Closure Test (Alpha Test)
 
     // ============================================================
     // FINAL PLOTS OF KAONS AND LAMBDAS VS NCH
@@ -691,13 +884,13 @@ hRecoGenRatio->Draw("HIST");
 
 
     if(K0sh && LambdaAntiLambda){
-        TCanvas* cFinalAllParticles = new TCanvas("cFinalAllParticles","Particles vs Nch",800,600);
+        TCanvas* cYieldVsNchAllParticles = new TCanvas("cYieldVsNchAllParticles","Particles vs Nch",800,600);
 
-        // --- Kaons
         gK0shNch->SetMarkerStyle(kFullCircle);
         gK0shNch->SetMarkerColor(kBlue);
         gK0shNch->SetLineColor(kBlue);
         gK0shNch->SetMarkerSize(1.2);
+        gK0shNch->SetTitle("K^{0}_{S} and #Lambda + #bar{#Lambda} Average Yield vs N_{ch}");
 
         // --- Lambdas
         gLambdaAntiLambdaNch->SetMarkerStyle(kFullSquare);
@@ -706,7 +899,7 @@ hRecoGenRatio->Draw("HIST");
         gLambdaAntiLambdaNch->SetMarkerSize(1.2);
 
         // Draw Kaons first (sets axes)
-        gK0shNch->SetTitle(";N_{ch};Yield");
+        gK0shNch->SetTitle(";N_{ch};Average Yield");
         gK0shNch->Draw("AP");
         gK0shNch->SetMinimum(0);
 
@@ -723,25 +916,43 @@ hRecoGenRatio->Draw("HIST");
         latexFinal->SetNDC();
         latexFinal->SetTextSize(0.03);
         latexFinal->DrawLatex(0.15, 0.70, "pp");
-        TString textlatexFinal = "#sqrt{#it{s}} = 13.6 TeV";
+        TString textlatexFinal = "#sqrt{#it{s}} = " + AO2DFiles.energy;
         latexFinal->DrawLatex(0.15, 0.65, textlatexFinal.Data());
         latexFinal->DrawLatex(0.15, 0.60, "|y| < 0.5");
-        cFinalAllParticles->Write();
-    }
 
+        cYieldVsNchAllParticles->Write();
 
+//---------------Mean Pt vs Nch----------------
+        TCanvas* cMeanPtVsNchAllParticles = new TCanvas("cMeanPtVsNchAllParticles","<pT> vs Nch",800,600);
 
+        gK0shMeanPtNch->SetMarkerStyle(kFullCircle);
+        gK0shMeanPtNch->SetMarkerColor(kBlue);
+        gK0shMeanPtNch->SetTitle("K^{0}_{S} and #Lambda + #bar{#Lambda} <pT> vs N_{ch}");
 
-    delete dataFile;
-    delete mcFile;
-    delete mcGenFile;
-    delete processedFile;
-    NchOutputFile->Close();
+        gLambdaAntiLambdaMeanPtNch->SetMarkerStyle(kFullSquare);
+        gLambdaAntiLambdaMeanPtNch->SetMarkerColor(kRed);
 
-    //TO ADD: Kaon vs Nch Plot
-    //TO ADD: Lambda vs Nch Plot
-    //TO ADD: Kaon & Lambda vs Nch Plot
-}
+        gK0shMeanPtNch->Draw("AP");
+
+        // Set fixed ranges
+        gK0shMeanPtNch->GetXaxis()->SetLimits(0, 25);          // Nch range
+        gK0shMeanPtNch->GetYaxis()->SetRangeUser(0.5, 1.5);    // <pT> range
+
+        gLambdaAntiLambdaMeanPtNch->Draw("P SAME");
+
+        TLegend* legMeanPt = new TLegend(0.15,0.75,0.35,0.88);
+        legMeanPt->AddEntry(gK0shMeanPtNch,"K^{0}_{S}","p");
+        legMeanPt->AddEntry(gLambdaAntiLambdaMeanPtNch,"#Lambda+#bar{#Lambda}","p");
+        legMeanPt->Draw();
+
+        cMeanPtVsNchAllParticles->Write();
+            }
+            delete dataFile;
+            delete mcFile;
+            delete mcGenFile;
+            delete processedFile;
+            NchOutputFile->Close();
+        }
 
 
 /*

@@ -11,23 +11,80 @@ TFile* F1 = nullptr;
 // INITIALIZATION OF FILE PATHS
 // ============================================================
 
-void InitAO2DFiles()
-{
-    AO2DFiles.datarootpath   = "PtSpectrumResults/Data/AnalysisResultsLHC22opass7Medium683739.root";
-    AO2DFiles.mcrootpath     = "PtSpectrumResults/MC/AnalysisResultsLHC24f3d683254.root";
-    AO2DFiles.mcgenrootpath  = "PtSpectrumResults/MC/AnalysisResultsLHC24f3d683254.root";
+enum class DataPeriod {pp22o, pp24, ppref24};
+//to add processed file
+static void InitAO2DFilesForPeriod(DataPeriod period) {
 
     AO2DFiles.hyperloopFiles = true;
 
-    if (AO2DFiles.hyperloopFiles) {
-        AO2DFiles.datarootsubfolder    = "v0-pt-inv-mass-plots";
-        AO2DFiles.mcrootsubfolder      = "v0-pt-inv-mass-plots_id17569";
-        AO2DFiles.mcgenrootsubfolder   = "v0-pt-inv-mass-plots_id18385";
-    } else {
-        AO2DFiles.datarootsubfolder    = "v0-pt-inv-mass-plots";
+    switch (period) {
+
+        case DataPeriod::pp22o:
+            AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC22opass7Medium718814.root";
+            AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC24f3d718362.root";
+            AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC24f3d718362.root";
+            AO2DFiles.processedrootpath = "V0s_Pt_Spectrum_Cent_13.6_TeVLHC22o.root";
+
+            AO2DFiles.energy = "13.6_TeV";
+            AO2DFiles.dataperiod = "pp220";
+
+            if (AO2DFiles.hyperloopFiles) {
+                AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots";
+                AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots_id17569";
+                AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots_id18385";
+            }
+            break;
+
+        case DataPeriod::pp24:
+            AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24pass1Medium718873.root";
+            AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC24f4d719006.root";
+            AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC24f4d719006.root";
+            AO2DFiles.processedrootpath = "V0s_Pt_Spectrum_Cent_13.6_TeVLHC24pp.root";
+
+            AO2DFiles.energy = "13.6_TeV";
+            AO2DFiles.dataperiod = "pp24";
+
+            if (AO2DFiles.hyperloopFiles) {
+                AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots";
+                AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots_id17569";
+                AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots_id18385";
+            }
+            break;
+
+        case DataPeriod::ppref24:
+            AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24appass1Medium732844.root"; //Medium
+            //AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24appass1Small732289.root"; //Small
+            //AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab6722011.root";
+            //AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab6722011.root";
+            AO2DFiles.processedrootpath = "V0s_Pt_Spectrum_Cent_5.36_TeVLHC24ppref.root";
+            AO2DFiles.energy = "5.36_TeV";
+            AO2DFiles.dataperiod = "ppref24";
+
+            //MC Closure Test:
+            //AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC25b4ab62731626ClosureTestDATA.root";
+            AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab62731626ClosureTestMC.root";
+            AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab62731626ClosureTestMC.root";
+
+            if (AO2DFiles.hyperloopFiles) {
+                AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots";
+                AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots_id41458";
+                AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots_id41459";
+            }
+            break;
+    }
+
+    if (!AO2DFiles.hyperloopFiles) {
+        AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots";
         AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots";
         AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots";
     }
+}
+
+// INITIALIZATION OVERLOAD!!
+
+void InitAO2DFiles()
+{
+    InitAO2DFilesForPeriod(DataPeriod::ppref24);
 }
 
 // ============================================================
@@ -38,25 +95,44 @@ namespace pthistos
 {
     TH2D* PtBin[100];
 
+    /*
     std::vector<std::string> ptbinsK0sh =
     {
         "0.0","0.1","0.2","0.3","0.4","0.5","0.6","0.7","0.8","0.9",
         "1.0","1.1","1.2","1.3","1.4","1.5","1.6","1.7","1.8","1.9",
         "2.0","2.2","2.4","2.6","2.8","3.0","3.3","3.6","3.9","4.2",
-        "4.6","5.0","5.4","5.9","6.5","7.0","7.5","8.0","8.5","9.2",
-        "10.0","11.0","12.0","13.5","15.0"
+        "4.6","5.0","5.4","5.9","6.5","7.0","8.0","10.0","12.0","14.0",
+        "16.0"
+    };
+*/
+    //this for ppref24
+    std::vector<std::string> ptbinsK0sh =
+    {
+    "0.0","0.2","0.4","0.5","0.6","0.7","0.8","0.9","1.0","1.2","1.4","1.6","1.8","2.0",
+    "2.3","2.6","2.9","3.2","3.4","3.7","4.0","4.5","5.5","6.5"
     };
 
+/*
     std::vector<std::string> ptbinslambda =
     {
-        "0.5","0.6","0.7","0.8","0.9","1.0","1.1","1.2","1.3","1.4",
-        "1.5","1.6","1.7","1.8","1.9","2.0","2.2","2.4","2.6","2.8",
-        "3.0","3.2","3.4","3.6","3.8","4.0","4.4","4.9","5.5","6.0",
-        "7.0","8.0","10.0"
+        "0.4","0.6","0.8","1.0","1.2","1.4","1.6","1.8","2.0",
+        "2.2","2.5","2.9","3.4","4.0","5.0","6.5","8.0","10.0"
+    };
+*/
+
+    //this for ppref24
+    std::vector<std::string> ptbinslambda =
+    {
+    "0.5","0.6","0.7","0.8","0.9","1.0","1.2","1.4","1.6","1.8","2.0",
+    "2.3","2.6","2.9","3.2","3.4","3.7","4.0","4.5","5.5","6.5"
     };
 
+
     std::vector<double> centBinsK0sh = {0, 1, 5, 10, 15, 20, 30, 40, 50, 70, 100};
+    //std::vector<double> centBinsK0sh = {0, 50, 100};
     std::vector<double> centBinsLambda = {0, 1, 5, 10, 15, 20, 30, 40, 50, 70, 100};
+    //std::vector<double> centBinsK0sh = {0, 100};
+    //std::vector<double> centBinsLambda = {0, 100};
 }
 
 // ============================================================
@@ -353,7 +429,7 @@ void LoadCentralityFunctions(TFile* file, const std::string& particle,const std:
 // ============================================================
 // Compute Baryon to Meson Ratio L_AL / 2K0sh
 // ============================================================
-void ComputeCentralityRatios(TFile* file, const std::string& histName, const std::vector<double>& centBins, std::vector<TH1D*>& ratioList, TH1D*& hRatioSum)
+void ComputeBaryonToMesonRatio(TFile* file, const std::string& histName, const std::vector<double>& centBins, std::vector<TH1D*>& ratioList, TH1D*& hRatioSum)
 {
     ratioList.clear();
     hRatioSum = nullptr;
@@ -412,9 +488,6 @@ void ComputeCentralityRatios(TFile* file, const std::string& histName, const std
 
             double k_low  = hK->GetBinLowEdge(i);
             double k_high = hK->GetBinLowEdge(i + 1);
-
-            if (k_low < 0.5 || k_high > 3.0 + 1e-6)
-                continue;
 
             // ----------------------------------------------------
             // Find matching Lambda bin
@@ -516,9 +589,6 @@ void ComputeCentralityRatios(TFile* file, const std::string& histName, const std
             double k_low  = hK->GetBinLowEdge(i);
             double k_high = hK->GetBinLowEdge(i + 1);
 
-            if (k_low < 0.5 || k_high > 3.0 + 1e-6)
-                continue;
-
             int jL  = -1;
             int jAL = -1;
 
@@ -583,9 +653,6 @@ void ComputeCentralityRatios(TFile* file, const std::string& histName, const std
 
         double k_low  = hK_sum->GetBinLowEdge(i);
         double k_high = hK_sum->GetBinLowEdge(i + 1);
-
-        if (k_low < 0.5 || k_high > 3.0 + 1e-6)
-            continue;
 
         int jL  = -1;
         int jAL = -1;
@@ -1033,4 +1100,27 @@ std::vector<TH1F*> CloneStorage(const std::vector<TH1F*>& input, const TString& 
     }
 
     return output;
+}
+
+// ============================================================
+// ERROR PROPAGATION HELPER
+// ============================================================
+void RecordStatError(TH2D* hStatError, TH2D* hRelStatError, int stage,TH1* h)
+{
+    for (int bin = 1; bin <= h->GetNbinsX(); ++bin) {
+
+        double value = h->GetBinContent(bin);
+        double error = h->GetBinError(bin);
+
+        hStatError->SetBinContent(stage, bin, error);
+
+        if (std::abs(value) > 1e-12) {
+            hRelStatError->SetBinContent(
+                stage,
+                bin,
+                100.0 * error / std::abs(value));
+        } else {
+            hRelStatError->SetBinContent(stage, bin, 0.0);
+        }
+    }
 }

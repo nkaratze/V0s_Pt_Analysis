@@ -31,7 +31,10 @@
 
 #endif
 
-#include <fmt/format.h>
+//#include <fmt/format.h> change back to this once root on O2Physics is working
+
+#define FMT_HEADER_ONLY
+#include "/Users/nxk335-local/alice/sw/osx_arm64/fmt/11.1.2-local1/include/fmt/format.h"
 
 // ============================================================
 // GLOBAL NAMESPACE
@@ -55,9 +58,12 @@ struct AO2DConfig
 std::string datarootpath;
 std::string mcrootpath;
 std::string mcgenrootpath;
+std::string processedrootpath;
 std::string datarootsubfolder;
 std::string mcrootsubfolder;
 std::string mcgenrootsubfolder;
+TString energy;
+TString dataperiod;
 bool hyperloopFiles;
 };
 
@@ -93,7 +99,7 @@ void LoadCentralityFunctions(TFile* file, const std::string& particle, const std
 // RATIO COMPUTATION
 // ============================================================
 
-void ComputeCentralityRatios(TFile* file, const std::string& histName, const std::vector<double>& centBins, std::vector<TH1D*>& ratioList, TH1D*& hRatioSum);
+void ComputeBaryonToMesonRatio(TFile* file, const std::string& histName, const std::vector<double>& centBins, std::vector<TH1D*>& ratioList, TH1D*& hRatioSum);
 
 // ============================================================
 // DRAWING FUNCTIONS

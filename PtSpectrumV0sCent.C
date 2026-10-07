@@ -1,6 +1,6 @@
 #include "AnalysisLibrary.cxx"
 
-void CalculateSignal(const std::string& particle, const std::string& histSuffix, const std::vector<std::string>& ptbins, std::vector<double_t>& signal, TFile* file, TDirectory* centdir, int mcflag, std::vector<double_t>& mc_sig_low, std::vector<double_t>& mc_sig_high, std::vector<double_t>& peakpt, std::vector<double_t>& widthpt, int nhistos, float cent_low, float cent_high, TString energy){
+void CalculateSignal(const std::string& particle, const std::string& histSuffix, const std::vector<std::string>& ptbins, std::vector<double_t>& signal, TFile* file, TDirectory* centdir, int mcflag, std::vector<double_t>& mc_sig_low, std::vector<double_t>& mc_sig_high, std::vector<double_t>& peakpt, std::vector<double_t>& widthpt, int nhistos, float cent_low, float cent_high, TH2D* hStatError, TH2D* hRelStatError){
     Double_t M_low = 0.45;
     Double_t M_high = 0.55;
 
@@ -19,6 +19,11 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
 
         TH2F* h2D=(TH2F*)gDirectory->Get(fmt::format("{}_{}_to_{}", histname, histptbinsnames[i],histptbinsnames[i+1]).data());
         if(h2D == nullptr) {
+            std::cout << "Trying to read histogram:" << std::endl;
+            std::cout << "  histname = " << histname << std::endl;
+            std::cout << "  pt bin i = " << histptbinsnames[i] << std::endl;
+            std::cout << "  pt bin i+1 = " << histptbinsnames[i+1] << std::endl;
+            std::cout << "  Current directory = " << gDirectory->GetPath() << std::endl;
             std::cout << "h2D was not read" << std::endl; 
             exit(1);
         }
@@ -28,17 +33,8 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
    
       // Create a unique name for this slice
         std::string hname_slice =fmt::format("{}_{}_to_{}_cent{}_to{}",histname,histptbinsnames[i], histptbinsnames[i+1],(int)cent_low, (int)cent_high);
-
-      // PROJECT invariant mass (X axis) for the centrality slice
-      //TH1F* h1 = (TH1F*) pthistos::PtBin[i]->ProjectionX(hname_slice.c_str(), y1, y2);      // Centrality bin range
-      //auto h1 = pthistos::PtBin[i]->ProjectionX(hname_slice.c_str(), y1, y2);
-      // Access raw pointer and project to TH1*
+        
         TH1D* h1 = h2D->ProjectionX(hname_slice.c_str(), y1, y2);
-
-      //auto* h1 = dynamic_cast<TH1*>(h1d);
-      //TH2F* h2 = (TH2F*)gDirectory->Get(...);
-      //if (!h2) { std::cout << "Histogram not found!\n"; exit(1); }
-
         if (!h1 || h1->GetEntries() == 0) {
             std::cout << "Empty slice: pT "  << histptbinsnames[i] << "–" << histptbinsnames[i+1]<< ", cent " << cent_low << "–" << cent_high << "\n";
             continue;
@@ -52,7 +48,7 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
         TString latexTitle = "K^{0}_{s} Invariant Mass";
         if (TString(particle).Contains("AntiLambda", TString::kIgnoreCase)) {
             particleMass = 1.115683;
-            latexTitle = "Antilambda Invariant Mass";
+            latexTitle = "\\bar{\\Lambda} Invariant Mass";
          // extend fitting window for AntiLambda
             M_low = 1.08; M_high = 1.16;
         } else if (TString(particle).Contains("Lambda", TString::kIgnoreCase)) {
@@ -98,7 +94,8 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
         ff->SetParLimits(6, 0., 1.11e3);
       //
         cout<<"Invariant Mass Plot to be fitted Pt ranges: "<<histptbinsnames[i]<<" to "<<histptbinsnames[i+1]<<" and Centrality:  "<<cent_low<<" to "<<cent_high<<endl;
-        h1->Fit(ff,"LB");   //L is used instead of Minuit and B is for the setparlimits() to take effect
+        //h1->Fit(ff,"LB");   //L is used instead of Minuit and B is for the setparlimits() to take effect
+        TFitResultPtr fitResult = h1->Fit(ff, "S LB");
 
         Double_t *pars = ff->GetParameters(); 
         Double_t mean = pars[1];
@@ -204,7 +201,7 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
       // Starting position (x = 0.15, y = 0.85) and line spacing (~0.04)
         latexinv->DrawLatex(0.15, 0.80, latexTitle);
         latexinv->SetTextSize(0.03);  // Size to match your plot
-        latexinv->DrawLatex(0.15, 0.72, "pp, #sqrt{#it{s}} = " + energy);
+        latexinv->DrawLatex(0.15, 0.72, "pp, #sqrt{#it{s}} = " + AO2DFiles.energy);
         TString latexLabel = TString::Format("%s #leq #it{p}_{T} < %s GeV/#it{c}", ptbins[i].c_str(), ptbins[i+1].c_str());
         latexinv->DrawLatex(0.15, 0.67, latexLabel);
         latexinv->DrawLatex(0.15, 0.62, Form("Centrality %.0f%% to %.0f%%", cent_low, cent_high));
@@ -232,42 +229,86 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
 
         Double_t bckg = fpol->Integral(sig_low,sig_high);
         cout << "bckg:" << bckg/h1->GetBinWidth(0) << std::endl;
-        double_t realbckg = bckg/h1->GetBinWidth(0);
-      //if(mcflag==1){
-      //realbckg=0.;
-      //}
+        Double_t realbckg = bckg/h1->GetBinWidth(0);
+        if(mcflag==1){
+            realbckg=0.;
+        }
         signal[i]=sigplusbckg-realbckg;
         peakpt[i]=pars[1];
         widthpt[i]=fwhm_voigt;
         cout<<"Signal:"<<signal[i]<<endl<<"Number of Plot:"<<i+1<<endl;
+
+        //
+        // Error propagation
+        //
+        //Stat Error from the Signal+Background counts
+        Double_t sigplusbckgError2 = 0.0;
+
+        for (Int_t b = i_low; b <= i_high; ++b) {
+            Double_t err = h1->GetBinError(b);
+            sigplusbckgError2 += err * err;
+        }
+        Double_t sigplusbckgError = TMath::Sqrt(sigplusbckgError2);
+
+        //Stat Error from the background fit
+        TMatrixDSym cov = fitResult->GetCovarianceMatrix();
+        Double_t binWidth = h1->GetBinWidth(0);
+
+        Double_t dBdp4 = (sig_high - sig_low) / binWidth;
+        Double_t dBdp5 = (sig_high * sig_high - sig_low * sig_low) / (2.0 * binWidth);
+        Double_t dBdp6 = (pow(sig_high, 3) - pow(sig_low, 3)) / (3.0 * binWidth);
+
+        Double_t bckgError2 = dBdp4 * dBdp4 * cov(4,4) + dBdp5 * dBdp5 * cov(5,5) + dBdp6 * dBdp6 * cov(6,6) + 2.0 * dBdp4 * dBdp5 * cov(4,5) + 2.0 * dBdp4 * dBdp6 * cov(4,6) + 2.0 * dBdp5 * dBdp6 * cov(5,6);
+        Double_t bckgError = TMath::Sqrt(bckgError2);
+
+        //Stat Error 1: Singnal Extraction Error (independent? they are from the same histogram, but one is from the fit and the other is from the bin counts)
+        Double_t signalError =
+        TMath::Sqrt(sigplusbckgError * sigplusbckgError + bckgError * bckgError);
+
+        if (mcflag == 0) {
+            // Error Stage 1: Invariant mass / signal extraction
+            hStatError->SetBinContent(1, i + 1, signalError);
+            hRelStatError->SetBinContent(1, i + 1, 100.0 * signalError / signal[i]);
+
+            // Label the analysis stage
+            hStatError->GetXaxis()->SetBinLabel(1, "Inv. mass");
+            hRelStatError->GetXaxis()->SetBinLabel(1, "Inv. mass");
+        }
+    //end of error propagation
     }//histo loop
     return;
 }
 //
 //PlottingFunction
 //
-void PlotSignal(const std::string& particle, const std::vector<std::string>& ptbins, TFile* file, AO2DConfig& AO2DFiles, TDirectory* centdir, float cent_low, float cent_high, int centralityIndex, TString energy){
-   //
+void PlotSignal(const std::string& particle, const std::vector<std::string>& ptbins, TFile* file, AO2DConfig& AO2DFiles, TDirectory* centdir, float cent_low, float cent_high, int centralityIndex){
+    //
+    //
 // Initializing measured and reconstructed signals to be calculated from inv mass pltos
    //
     int nhistos = ptbins.size()-1;  //warning for less than a few thousand
-    std::vector<double_t> signal_measured(nhistos);
-    std::vector<double_t> signal_reconstructed(nhistos);
-    std::vector<double_t> signal_split_reconstructed(nhistos);
-    std::vector<double_t> peak_measured(nhistos);
-    std::vector<double_t> peak_reconstructed(nhistos);
-    std::vector<double_t> width_measured(nhistos);
-    std::vector<double_t> width_reconstructed(nhistos);
-    std::vector<double_t> mc_sig_low(nhistos);
-    std::vector<double_t> mc_sig_high(nhistos);
+    std::vector<Double_t> signal_measured(nhistos);
+    std::vector<Double_t> signal_reconstructed(nhistos);
+    std::vector<Double_t> signal_split_reconstructed(nhistos);
+    std::vector<Double_t> peak_measured(nhistos);
+    std::vector<Double_t> peak_reconstructed(nhistos);
+    std::vector<Double_t> width_measured(nhistos);
+    std::vector<Double_t> width_reconstructed(nhistos);
+    std::vector<Double_t> mc_sig_low(nhistos);
+    std::vector<Double_t> mc_sig_high(nhistos);
+
     int mcflag=0;
    //make strings of pt values into double for use
-    std::vector<double> ptbinedges(nhistos+1);
+    std::vector<Double_t> ptbinedges(nhistos+1);
     for (int i = 0; i < nhistos+1; i++) {
         ptbinedges[i] = std::stod(ptbins[i]);
     }
    //end initialisation
    //
+    //Histograms to be filled with the error evolution
+    //
+    TH2D* hStatError = new TH2D("hStatError","Evolution of Statistical Uncertainty;Analysis stage;p_{T} (GeV/c)",10, 0.5, 10.5,nhistos, ptbinedges.data());
+    TH2D* hRelStatError = new TH2D("hRelStatError","Evolution of Relative Statistical Uncertainty;Analysis stage;p_{T} (GeV/c)",10, 0.5, 10.5,nhistos, ptbinedges.data());
  //
 //Access Reconstructed DATA to get Measured Pt Inv. Mass Plots and Ncollisions
    //
@@ -290,7 +331,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     dataroot->cd(datamassSubDir);
     mcflag=0;
     std::string histname;
-    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_measured, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_measured, width_measured, nhistos, cent_low, cent_high, energy);
+    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_measured, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_measured, width_measured, nhistos, cent_low, cent_high, hStatError, hRelStatError);
     TH1* hMeasured = new TH1D(Form("%sMeasuredPtSpectrum", particleName.c_str()), Form("%sMeasuredPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     TH1* hPeak = new TH1D(Form("%sPeakvsPtSpectrum", particleName.c_str()), Form("%sPeakvsPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     TH1* hWidth = new TH1D(Form("%sWidthvsPtSpectrum", particleName.c_str()), Form("%sWidthvsPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
@@ -359,7 +400,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
    //Getting Histo for Event Efficiency, bin 0.5 is Event Efficiency Denominator and bin 2.5 is Numerator (also Event Split Denomimator)
    //No it's 1.5 and 3.5
     TH1* hNEventsCorrections = ReadAndSaveHistogramProjection("hNEvents_Corrections","hNEvents_CorrectionsSaved",cent_low, cent_high);
-    double nCollisionsGen = hNEventsCorrections->GetBinContent(1);  //<-------CHECK THIS
+    double nCollisionsGen = hNEventsCorrections->GetBinContent(2);  //<-------CHECK THIS
 
     TH1* hGeneratedXiMinus = nullptr;
     TH1* hGeneratedXiZero = nullptr;
@@ -390,7 +431,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     TString mcMassSubDir = Form("%s/%sMassPlotsPerPtBin",mcSubDir.Data(), particleName.c_str());
     mcroot->cd(mcMassSubDir);
     mcflag=1;
-    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_reconstructed, file, centdir,mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, energy);
+    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_reconstructed, file, centdir,mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError);
 
     TH1* hReconstructedMC = new TH1D(Form("%sReconstructedPtSpectrum", particleName.c_str()), Form("%sReconstructedPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     for(int i=0;i<nhistos;i++){
@@ -399,7 +440,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
    //Getting Histos and Calculating Particle Signal Split
     TString mcMassSplitSubDir = Form("%s/%sSplitMassPlotsPerPtBin",mcSubDir.Data(), particleName.c_str());
     mcroot->cd(mcMassSplitSubDir);
-    CalculateSignal(particleName, "SplitPt_vs_Cent_from", ptbins, signal_split_reconstructed, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, energy);
+    CalculateSignal(particleName, "SplitPt_vs_Cent_from", ptbins, signal_split_reconstructed, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError);
     histname = Form("h%sPt_vs_Cent_from", particleName.c_str());
     TH1* hParticleSignalSplitNumerator = new TH1D(Form("h%sSignalSplitNumerator", particleName.c_str()), Form("h%sSignalSplitNumerator", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     for(int i=0;i<nhistos;i++){
@@ -437,56 +478,119 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 //
 //Access XiMinus+Xiplus Corrected Pt Spectrum downloaded from HEPData for Feeddown. (Run 2 Xi: https://www.hepdata.net/record/ins1748157?version=1 )
 // Only perform Run2 Xi handling for Lambda or AntiLambda (not for K0sh)
-    TH1D* hRun3Xi = nullptr;
-    std::vector<double> XiscaleFactors = {12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0}; //powers of two that the original plots are scaled by per centrality
-    if (particle == "Lambda" || particle == "AntiLambda") {
-      
-        hRun3Xi = new TH1D("CorrectedRun3XiPtSpectrum", "CorrectedRun3XiPtSpectrum", ptbinedges.size()-1, ptbinedges.data());
 
-        TFile *xiFile = TFile::Open("XiCorrectedRun3RomanRUSRenamed.root");
-        if (!xiFile || xiFile->IsZombie()) {
-            std::cout << "ERROR: cannot open file!" << std::endl;
+
+    TH1D* hXiCorrectedSpectrumInput = nullptr;
+    std::vector<double> XiscaleFactors = {12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0};
+
+    if (particle == "Lambda" || particle == "AntiLambda") {
+
+        hXiCorrectedSpectrumInput = new TH1D("CorrectedXiPtSpectrumInput", "CorrectedXiPtSpectrumInput", ptbinedges.size()-1, ptbinedges.data());
+
+        TString xiFileName;
+        TString xiDirName;
+        TString xiHistName;
+        TH1F *xiHisto = nullptr;
+
+        if (AO2DFiles.dataperiod == "pp24" || AO2DFiles.dataperiod == "pp22o") {
+            xiFileName = "XiCorrectedRun3RomanRUSRenamed.root";
+            xiDirName = "";
+            xiHistName = Form("Yield_XiPm_m%d", centralityIndex + 1);
+        }
+        else if (AO2DFiles.dataperiod == "ppref24") { //for ppref
+            xiFileName = "HEPData502Paper_ModifiedXi.root";  
+            xiDirName = "Figure 1c";
+            xiHistName = Form("Hist1D_y%d", centralityIndex + 1);
+        }
+        else {
+            std::cout << "ERROR: Unsupported data period: "
+                    << AO2DFiles.dataperiod << std::endl;
             return;
         }
 
-      //Find the correct histogram name based on centrality
-        TH1F* xiHisto = (TH1F*)xiFile->Get(Form("Yield_XiPm_m%d", centralityIndex+1)); //centralityIndex starts at 0, first histogram is 0-100%, so we start at the second one 0-1% ect...
-        if (!xiHisto) {
-            std::cout << "ERROR: Histogram 'Yield_XiPm_m" <<  centralityIndex+1 << "' not found!" << std::endl;
+        TFile *xiFile = TFile::Open(xiFileName);
+        if (!xiFile || xiFile->IsZombie()) {
+            std::cout << "ERROR: cannot open file " << xiFileName << std::endl;
+            return;
         }
-        std::cout << "Using TH1F '" << xiHisto->GetName()<< "' for feeddown." << std::endl;
 
-        double Xiscale = std::pow(2.0, XiscaleFactors[centralityIndex]);
-        xiHisto->Scale(1.0 / Xiscale);
+        if (xiDirName.IsNull()) {
+            // Histogram is in the top level of the ROOT file
+            xiHisto = dynamic_cast<TH1F*>(xiFile->Get(xiHistName));
+            // Only apply the scaling if needed
+            double Xiscale = std::pow(2.0, XiscaleFactors[centralityIndex]);
+            xiHisto->Scale(1.0 / Xiscale);
+        }
+        else {
+        // Histogram is inside a directory
+            TDirectory *dirXiInput = dynamic_cast<TDirectory*>(xiFile->Get(xiDirName));
+            if (!dirXiInput) {
+                std::cout << "ERROR: Directory " << xiDirName << " not found!" << std::endl;
+                return;
+            }
+            xiHisto = dynamic_cast<TH1F*>(dirXiInput->Get(xiHistName));
+        }
 
+        std::cout << "Using TH1F '" << xiHisto->GetName() << "' for feeddown." << std::endl;
         cout<<"Xi Histogram fitted for Centrality Index: "<<centralityIndex<<endl;
-      //
-        double mXi=1.32171; //mass of Xi Particle
-        TF1 *levyTsallisXi = new TF1("levyTsallisXi", "x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.))))) * pow(1.+((sqrt(pow([3], 2.)+pow(x, 2.))-[3])/([1]*[2])), -[1])", 0.1, 10);
-        levyTsallisXi->SetParameter(3, mXi);  // Set m as a parameter
-        levyTsallisXi->FixParameter(3, mXi);  // Fix m so it does not change during fitting as it is fixed
-        levyTsallisXi->SetParameters(0.01, 10, 0.3);
+        //
+        double fitMin, fitMax;
+        double mXi = 1.32171; // Xi mass
+
+        if (AO2DFiles.dataperiod == "ppref24") {
+            fitMin = 0.6;
+            fitMax = 6.5;
+        } else {
+            fitMin = 0.6;
+            fitMax = 6.5;
+        }
+
+        TF1 *levyTsallisXi = new TF1("levyTsallisXi","x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.)))))*pow(1.+((sqrt(pow([3],2.)+pow(x,2.))-[3])/([1]*[2])),-[1])",fitMin,fitMax);
+        levyTsallisXi->FixParameter(3, mXi);
+
+        // Different initial parameters depending on the dataset
+        if (AO2DFiles.dataperiod == "ppref24") {
+
+            // pp reference (HEPData Figure 1c)
+            levyTsallisXi->SetParameters(5e-3, 8.0, 0.40);
+            levyTsallisXi->SetParLimits(0, 1e-6, 1.0);   // Normalisation
+            levyTsallisXi->SetParLimits(1, 4.0, 20.0);   // n
+            levyTsallisXi->SetParLimits(2, 0.10, 1.20);  // C (GeV/c)
+
+        }
+        else {
+
+            // Run 3 Xi pp from Roman
+            levyTsallisXi->SetParameters(1e-2, 10.0, 0.30);
+            levyTsallisXi->SetParLimits(0, 1e-6, 1.0);
+            levyTsallisXi->SetParLimits(1, 4.0, 20.0);
+            levyTsallisXi->SetParLimits(2, 0.10, 1.20);
+
+        }
+
         xiHisto->Fit(levyTsallisXi, "R");
 
         for (size_t bin = 0; bin < ptbinedges.size()-1; ++bin) {  
             double binLow = ptbinedges[bin];
             double binHigh = ptbinedges[bin+1];
             double integral = levyTsallisXi->Integral(binLow, binHigh); // Integrate Levy-Tsallis function over bin range
-            double Run3Xierror = sqrt(integral);
-            hRun3Xi->SetBinContent(bin+1, integral);  // ROOT bins start at 1
-            hRun3Xi->SetBinError(bin+1, 0.0);  // Set error to 0 for now
-         //hRun3Xi->SetBinError(bin+1, Run3Xierror);
+            double  Xierror = sqrt(integral);
+            hXiCorrectedSpectrumInput->SetBinContent(bin+1, integral);  // ROOT bins start at 1
+            hXiCorrectedSpectrumInput->SetBinError(bin+1, 0.0);  // Set error to 0 for now
+         //hXiCorrectedSpectrumInput->SetBinError(bin+1, Xierror);
         }
     }
 //
 //end of accessing and saving DATA
-   //
+//
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////                Start of Analysis                /////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    ///////////////
 //MC Corrections
    //////////////
+    TH1* hStatErrorEvolution =(TH1*)hMeasured->Clone("hStatErrorEvolution");
+
    //Event Efficiency
    //Reminder: Bin 0.5 is Event Efficiency Denominator and Bin 2.5 is Numenator NO it's 
    //Reminder: Bin 0.5 NO its 1.5! is Event Efficiency Denominator and Bin 2.5 is Numeneator NO its 3.5!
@@ -496,15 +600,21 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
         return;
     }
     double EventEfficiency = hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(5.5)) / hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(1.5));
+    double EventEfficiencyError = std::sqrt(EventEfficiency * (1.0 - EventEfficiency) / hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(1.5)));
     TH1* hParticleEventEfficiency = new  TH1D(Form("%s Event Reconstruction Efficiency", particleName.c_str()), Form("%s Event Reconstruction Efficiency", particleName.c_str()), ptbinedges.size()-1,ptbinedges.data()); //Save it for each particle to calculate spectrum but it's the same
     for (int bin = 1; bin <= hParticleEventEfficiency->GetNbinsX(); ++bin) {
         hParticleEventEfficiency->SetBinContent(bin, EventEfficiency);
-        hParticleEventEfficiency->SetBinError(bin, 0.0);
+        hParticleEventEfficiency->SetBinError(bin, EventEfficiencyError);
     }
     hParticleEventEfficiency->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleEventEfficiency->GetYaxis()->SetTitle("Event Efficiency");
     hParticleEventEfficiency->SetMarkerStyle(20);  // full circle
     hParticleEventEfficiency->SetMarkerSize(1.2);
+
+
+    hStatError->GetXaxis()->SetBinLabel(6, "Event efficiency");
+    hRelStatError->GetXaxis()->SetBinLabel(6, "Event efficiency");
+
    
    //Event Spliting
     if(hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5))==0){
@@ -513,21 +623,33 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     }
 
     double EventSplitting = hNRecEventsMC->GetEntries()/hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5));
+    double EventSplittingError =std::sqrt(EventSplitting * (1.0 - EventSplitting) / hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5)));
+
     TH1* hParticleEventSplitting = new  TH1D(Form("%s Event Splitting", particleName.c_str()), Form("%s Event Splitting", particleName.c_str()), ptbinedges.size()-1,ptbinedges.data());
     for (int bin = 1; bin <= hParticleEventSplitting->GetNbinsX(); ++bin) {
         hParticleEventSplitting->SetBinContent(bin, EventSplitting);
-        hParticleEventSplitting->SetBinError(bin, 0.0);
+        hParticleEventSplitting->SetBinError(bin, EventSplittingError);
     }
     hParticleEventSplitting->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleEventSplitting->GetYaxis()->SetTitle("Event Splitting");
     hParticleEventSplitting->SetMarkerStyle(20);  // full circle
     hParticleEventSplitting->SetMarkerSize(1.2);
 
+
+    hStatError->GetXaxis()->SetBinLabel(7, "Event splitting");
+    hRelStatError->GetXaxis()->SetBinLabel(7, "Event splitting");
+
    //Event Reconstruction Particle Signal Loss
     TH1* hParticleSignalLoss = (TH1*)hSignalLossNumerator->Clone(Form("%sSignalLoss", particleName.c_str()));
     hParticleSignalLoss->Divide(hSignalLossNumerator, hSignalLossDenominator, 1.0, 1.0,"B");
     hParticleSignalLoss->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleSignalLoss->GetYaxis()->SetTitle("Signal Loss");
+
+    hStatErrorEvolution->Divide(hParticleSignalLoss);
+    RecordStatError(hStatError,hRelStatError,4,hStatErrorEvolution);
+
+    hStatError->GetXaxis()->SetBinLabel(4, "Signal loss");
+    hRelStatError->GetXaxis()->SetBinLabel(4, "Signal loss");
 
    //Xi Feeddown Correction
 //Warning: Our Xi Spectrum is XiMinus+XiPlus; we divide by 2 to account for XiMinus and XiZero symmetry
@@ -556,7 +678,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     }
 
     if (particle == "Lambda" || particle == "AntiLambda") {
-        int nRecoPtBins = hRun3Xi->GetNbinsX();
+        int nRecoPtBins = hXiCorrectedSpectrumInput->GetNbinsX();
       // Feeddown matrices and accumulators
       // Xi charged (XiMinus for Lambda, XiPlus for AntiLambda)
         std::vector<std::vector<double>> feeddownXiSignMatrix(nRecoPtBins, std::vector<double>(nRecoPtBins, 0.0));
@@ -586,7 +708,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
             // Get normalized Xi generation content
                 double genXiSignContent = hGenXiSign->GetBinContent(xiGenPtBin);
                 double genXiNeutralContent = hGenXiNeutral->GetBinContent(xiGenPtBin);
-                double xiSpectrumContent = hRun3Xi->GetBinContent(xiGenPtBin) / 2.0; // This is XiMinus+XiPlus spectrum, divide by 2 for individual Xi contribution
+                double xiSpectrumContent = hXiCorrectedSpectrumInput->GetBinContent(xiGenPtBin) / 2.0; // This is XiMinus+XiPlus spectrum, divide by 2 for individual Xi contribution
             
             // Avoid division by zero
                 if (genXiSignContent < 1e-10) genXiSignContent = 1.0;
@@ -648,7 +770,9 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
             }
         }
     }
-   //
+
+    hStatError->GetXaxis()->SetBinLabel(2, "Feeddown");
+    hRelStatError->GetXaxis()->SetBinLabel(2, "Feeddown");
 
    //Particle Signal Splitting
     TH1* hParticleSignalSplitting = (TH1*)hParticleSignalSplitNumerator->Clone(Form("%sSignalSplitting", particleName.c_str()));
@@ -656,11 +780,21 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hParticleSignalSplitting->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleSignalSplitting->GetYaxis()->SetTitle("Signal Splitting");
 
+
+
+    hStatError->GetXaxis()->SetBinLabel(5, "Signal splitting");
+    hRelStatError->GetXaxis()->SetBinLabel(5, "Signal splitting");
+
    //V0 Reconstruction Efficiency for this particle
     TH1* hParticleEfficiency = new  TH1D(Form("%s Reconstruction Efficiency", particleName.c_str()), Form("%s Reconstruction Efficiency", particleName.c_str()), ptbinedges.size()-1,ptbinedges.data());
     hParticleEfficiency->Divide(hReconstructedMC, hGeneratedAfterEventSelection, 1.0, 1.0, "B");
     hParticleEfficiency->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleEfficiency->GetYaxis()->SetTitle("Efficiency");
+
+
+
+    hStatError->GetXaxis()->SetBinLabel(3, "V0 efficiency");
+    hRelStatError->GetXaxis()->SetBinLabel(3, "V0 efficiency");
 
    //V0 Ultimate Efficiency
     TH1* hParticleUltimateEfficiency = new  TH1D(Form("%s Ultimate Reconstruction Efficiency", particleName.c_str()), Form("%s Ultimate Reconstruction Efficiency", particleName.c_str()), ptbinedges.size()-1,ptbinedges.data());
@@ -672,7 +806,6 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 
 //////Event Level Corrections Applied
     double EventeLvlCorrections = (EventEfficiency * EventSplitting) / nCollisionsData;
-   //double EventeLvlCorrections = (EventEfficiency) / nCollisions;
     cout<<"////////////////////////////////////////////////////////////////////"<<endl;
     cout<<"/////////////////////////Event Level Corrections////////////////////"<<endl;
     cout<<"////////////////////////////////////////////////////////////////////"<<endl;
@@ -692,6 +825,11 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hCorrectedParticle->Divide(hParticleSignalLoss);
     hCorrectedParticle->Divide(hParticleSignalSplitting);
    //hCorrectedParticle->Divide(hMeasured,hParticleUltimateEfficiency);
+
+   RecordStatError(hStatError,hRelStatError,8,hCorrectedParticle);
+
+    hStatError->GetXaxis()->SetBinLabel(8, "Final");
+    hRelStatError->GetXaxis()->SetBinLabel(8, "Final");
 
    //DEB
     int nbins = hCorrectedParticle->GetNbinsX();
@@ -722,13 +860,15 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
         << std::endl;
     }
 
-//Final Corrected pt Spectrum
-    hCorrectedParticle->Scale(EventeLvlCorrections);
+    //Final Corrected pt Spectrum
+    hCorrectedParticle->Divide(hParticleEventEfficiency);
+    hCorrectedParticle->Divide(hParticleEventSplitting);
+    hCorrectedParticle->Scale(1.0 / nCollisionsData);
     NormalizeByBinWidth(hCorrectedParticle); //Normalize before fitting
 
    //Levy-Tsallis Fit 
     double mParticle = (particle == "K0sh") ? 0.497611 : 1.115683; // K0sh K0s mass vs Lambda mass
-    TF1 *levyTsallis = new TF1("levyTsallis", "x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.))))) * pow(1.+((sqrt(pow([3], 2.)+pow(x, 2.))-[3])/([1]*[2])), -[1])", 0.0, 14.0);
+    TF1 *levyTsallis = new TF1("levyTsallis", "x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.))))) * pow(1.+((sqrt(pow([3], 2.)+pow(x, 2.))-[3])/([1]*[2])), -[1])", 0.0, 16.0);
     levyTsallis->SetParameter(3, mParticle);  // Set m as a parameter
     levyTsallis->FixParameter(3, mParticle);  // Fix m so it does not change during fitting as it is fixed
     levyTsallis->SetParameters(1.0, 7.0, 0.25);
@@ -750,17 +890,174 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     legend->Draw();
     FinalFit->Update(); // Update the canvas to display everything
 
-   //Final Yield   
-   //double finalintegral = levyTsallisK0s->Integral(0, 10);  // Integrate over full pT range
-   //double binWidth = hCorrectedK0sh->GetXaxis()->GetBinWidth(1); // Get bin width
-   //double normalizedintegral = finalintegral / binWidth;  // Normalize for bin width
-   //cout<<"The final normalized integral is:  "<<normalizedintegral<<endl;
-
     hMeasured->SetOption("PE");
     hReconstructedMC->SetOption("PE");
+
+
+
+    TH1* hStatErrorEvolutionCheck = (TH1*)hMeasured->Clone("hStatErrorEvolutionCheck");
+
+// Stage 1: measured signal
+RecordStatError(hStatError, hRelStatError, 1,hStatErrorEvolutionCheck);
+
+// Stage 2: feeddown subtraction
+hStatErrorEvolutionCheck->Add(hTotalFeeddown,-1.0);
+
+RecordStatError(hStatError, hRelStatError, 2,hStatErrorEvolutionCheck);
+
+// Stage 3: V0 efficiency
+hStatErrorEvolutionCheck->Divide(hParticleEfficiency);
+RecordStatError(hStatError, hRelStatError, 3,hStatErrorEvolutionCheck);
+
+// Stage 4: signal loss
+hStatErrorEvolutionCheck->Divide(hParticleSignalLoss);
+RecordStatError(hStatError, hRelStatError, 4,hStatErrorEvolutionCheck);
+
+// Stage 5: signal splitting
+hStatErrorEvolutionCheck->Divide(hParticleSignalSplitting);
+RecordStatError(hStatError, hRelStatError, 5,hStatErrorEvolutionCheck);
+
+// Stage 6: event efficiency
+hStatErrorEvolutionCheck->Divide(hParticleEventEfficiency);
+RecordStatError(hStatError, hRelStatError, 6,hStatErrorEvolutionCheck);
+
+// Stage 7: event splitting
+hStatErrorEvolutionCheck->Divide(hParticleEventSplitting);
+RecordStatError(hStatError, hRelStatError, 7,hStatErrorEvolutionCheck);
+
+// Stage 8: final
+RecordStatError(hStatError, hRelStatError, 8,hCorrectedParticle);
+
+// ============================================================
+// Print relative statistical uncertainty evolution
+// ============================================================
+
+std::cout << "\n============================================" << std::endl;
+std::cout << "Relative statistical uncertainty (%)" << std::endl;
+std::cout << "============================================" << std::endl;
+
+for (int stage = 1; stage <= 8; ++stage) {
+
+    std::cout << "\n=== Stage " << stage << " ===" << std::endl;
+
+    for (int bin = 1; bin <= hRelStatError->GetNbinsY(); ++bin) {
+
+        double ptLow  = hRelStatError->GetYaxis()->GetBinLowEdge(bin);
+        double ptHigh = hRelStatError->GetYaxis()->GetBinUpEdge(bin);
+
+        double relError =
+            hRelStatError->GetBinContent(stage, bin);
+
+        std::cout << "pT = ["
+                  << ptLow << ", "
+                  << ptHigh
+                  << "] : "
+                  << relError
+                  << " %" << std::endl;
+    }
+}
 //
-//Save everything
 //
+//Start of Alpha Test
+//
+//
+    TCanvas *cAlphaTest = new TCanvas("cAlphaTest", "Alpha test", 800, 800);
+    TPad *padAlpha1 = new TPad("padAlpha1", "Main pad", 0, 0.3, 1, 1.0);
+    TPad *padAlpha2 = new TPad("padAlpha2", "Ratio pad", 0, 0.05, 1, 0.3);
+
+    padAlpha1->Draw();
+    padAlpha2->Draw();
+
+    // -- Top pad: draw corrected and generated spectra --
+    padAlpha1->cd();
+    gStyle->SetOptTitle(0);
+    gStyle->SetOptStat(0);
+    padAlpha1->SetLogy(1);
+    padAlpha1->SetBottomMargin(0.01);
+
+    // Clone the original histogram to keep original unchanged and multiply by nCollisions so they are comparible
+    TH1D *hGeneratedAlpha = (TH1D*)hGenerated->Clone("hGeneratedAlpha");
+    //hGeneratedAlpha->Scale(1.0/nCollisionsGen);
+
+    TH1D *hCorrectedAlpha = (TH1D*)hCorrectedParticle->Clone("hCorrectedAlpha");
+    hCorrectedAlpha->Scale(nCollisionsGen);
+    hCorrectedAlpha->SetMarkerStyle(kFullCircle);
+    hCorrectedAlpha->SetMarkerColor(kBlue+1);
+    hCorrectedAlpha->SetLineColor(kBlue+1);
+    hCorrectedAlpha->SetMarkerSize(1);
+    hCorrectedAlpha->GetYaxis()->SetTitle("1/N_{INEL>0} d^{2}N/(dp_{T}dy) [(GeV/c)^{-1}]");
+    hCorrectedAlpha->Draw("PE");
+
+    hGeneratedAlpha->SetMarkerStyle(22);
+    hGeneratedAlpha->SetMarkerColor(kRed+1);
+    hGeneratedAlpha->SetLineColor(kRed+1);
+    hGeneratedAlpha->SetMarkerSize(1);
+    NormalizeByBinWidth(hGeneratedAlpha);
+    hGeneratedAlpha->Draw("PE SAME");
+
+    TLegend *legAlpha = new TLegend(0.55, 0.70, 0.88, 0.88);
+    legAlpha->SetTextSize(0.03);
+    legAlpha->SetBorderSize(0);
+    legAlpha->SetFillColor(kWhite);
+    legAlpha->AddEntry(hCorrectedAlpha, "Corrected Spectrum", "lp");
+    legAlpha->AddEntry(hGeneratedAlpha, "Generated Spectrum", "lp");
+    legAlpha->Draw();
+
+    TLatex latexAlpha;
+    latexAlpha.SetNDC();
+    latexAlpha.SetTextSize(0.03);
+    latexAlpha.DrawLatex(0.6, 0.65, "MC Closure Test (Alpha)");
+    latexAlpha.DrawLatex(0.6, 0.60, "pp");
+    latexAlpha.DrawLatex(0.6, 0.55, "#sqrt{#it{s}} = " +AO2DFiles.energy);
+    latexAlpha.DrawLatex(0.6, 0.50, "|y| < 0.5");
+
+        // -- Bottom pad: ratio Corrected / Generated --
+    padAlpha2->cd();
+    padAlpha2->SetGridy();
+    padAlpha2->SetTopMargin(0.01);
+    padAlpha2->SetBottomMargin(0.3);
+
+    // Checking errors
+    hGeneratedAlpha->Sumw2();
+    hCorrectedAlpha->Sumw2();
+
+        // Create ratio histogram
+    TH1D *hRatioAlpha = (TH1D*)hCorrectedAlpha->Clone("hRatioAlpha");
+    hRatioAlpha->SetTitle("");
+    hRatioAlpha->Divide(hCorrectedAlpha, hGeneratedAlpha, 1.0, 1.0);
+
+    hRatioAlpha->GetYaxis()->SetTitle("Corrected / Generated");
+    hRatioAlpha->GetYaxis()->SetTitleSize(0.08);
+    hRatioAlpha->GetYaxis()->SetTitleOffset(0.5);
+    hRatioAlpha->GetYaxis()->SetLabelSize(0.08);
+
+    hRatioAlpha->GetXaxis()->SetTitle("p_{T} (GeV/c)");
+    hRatioAlpha->GetXaxis()->SetTitleSize(0.10);
+    hRatioAlpha->GetXaxis()->SetTitleOffset(1.0);
+    hRatioAlpha->GetXaxis()->SetLabelSize(0.08);
+
+    hRatioAlpha->SetMarkerStyle(33);
+    hRatioAlpha->SetMarkerSize(1);
+    hRatioAlpha->SetMarkerColor(kCyan+2);
+    hRatioAlpha->SetLineColor(kCyan+2);
+    for (int i = 1; i <= hRatioAlpha->GetNbinsX(); ++i) {
+        hRatioAlpha->SetBinError(i, 0);
+    }
+    hRatioAlpha->Draw("PE");
+
+        // Reference line at 1
+    TLine *lineAlpha = new TLine(hRatioAlpha->GetXaxis()->GetXmin(), 1.0,
+    hRatioAlpha->GetXaxis()->GetXmax(), 1.0);
+    lineAlpha->SetLineStyle(2);
+    lineAlpha->Draw("SAME");
+
+    cAlphaTest->Update();
+    //
+    //End of Alpha Test
+    //
+    //
+    //Save everything
+    //
    //Function for safe-writting objects into intended directory and warning if they don't exist
     auto safeWriteObject = [&] (TObject* obj, const char* name, TDirectory* dir) {
         if (!obj) {
@@ -788,7 +1085,6 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 
 
    // Use function to safe save everything into centdir
-   //safeWriteObject(cAlphaTest, "K0sh Correction Alpha Test", centdir);
    //safeWriteObject(cBetaTest, "K0sh Correction Beta Test", centdir);
    //safeWriteObject(FinalFit, "Final Fit of Corrected Pt Spectrum", centdir);
 
@@ -796,14 +1092,11 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     safeWriteObject(hPeak, Form("%s Peak vs Pt Quality Control", particle.c_str()), centdir);
     safeWriteObject(hWidth, Form("%s Width vs Pt Quality Control", particle.c_str()), centdir);
     safeWriteObject(hNEventsCorrections, "Different Event Corrections", centdir);
-    safeWriteObject(hNEventsData, "Number of Events", centdir);
-    safeWriteObject(hNV0s, "Number of V0s", centdir);
     safeWriteObject(hParticleCount, Form("Number of %s", particleName.c_str()), centdir);
     safeWriteObject(hNEventsMC, "Number of Events MC", centdir);
     safeWriteObject(hNV0sMC, "Number of V0s MC", centdir);
     safeWriteObject(hParticleCountMC, Form("Number of %s MC", particleName.c_str()), centdir);
     safeWriteObject(hMeasured, Form("Measured %s Pt Spectrum", particleName.c_str()), centdir);
-    safeWriteObject(hGenerated, Form("Generated %s Pt Spectrum", particleName.c_str()), centdir);
     safeWriteObject(hGeneratedAfterEventSelection, Form("Generated %s Pt Spectrum After Event Selection", particleName.c_str()), centdir);
     safeWriteObject(hParticleUltimateEfficiency, Form("%s Ultimate Signal Efficiency", particle.c_str()), centdir);
    
@@ -818,12 +1111,23 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     safeWriteObject(hReconstructedMC, Form("%s MC Reconstructed Pt Spectrum", particle.c_str()), centdir);
     safeWriteObject(hNEventsCorrections, Form("%s Different Event Corrections", particle.c_str()), centdir);
     safeWriteObject(hRawParticle, Form("%s Raw Pt Spectrum", particle.c_str()), centdir);
+    safeWriteObject(hGenerated, Form("%s Generated Pt Spectrum", particleName.c_str()), centdir);
+    safeWriteObject(cAlphaTest, Form("%s Alpha test", particle.c_str()),centdir);
+    safeWriteObject(hRatioAlpha, Form("%s Ratio Alpha Test", particleName.c_str()), centdir);
+    safeWriteObject(hNEventsData, Form("%s Number of Events", particle.c_str()), centdir);
+    safeWriteObject(hNV0s, Form("%s Number of V0s", particle.c_str()), centdir);
+    safeWriteObject(hParticleCount, Form("%s Number of Particles", particleName.c_str()), centdir);
+    safeWriteObject(hPeak, Form("%s Peak vs Pt Quality Control", particle.c_str()), centdir);
+    safeWriteObject(hWidth, Form("%s Width vs Pt Quality Control", particle.c_str()), centdir);
+    safeWriteObject(hStatErrorEvolution, Form("%s Statistical Error Evolution", particle.c_str()), centdir);
+    safeWriteObject(hStatError, Form("%s Statistical Error", particle.c_str()), centdir);
+    safeWriteObject(hRelStatError, Form("%s Relative Statistical Error", particle.c_str()), centdir);
 
     if (particle == "Lambda" || particle == "AntiLambda") {
         safeWriteObject(hTotalFeeddown, Form("%s Total Feeddown", particle.c_str()), centdir);
         safeWriteObject(hTotalFeeddownFraction, Form("%s Total Feeddown Fraction", particle.c_str()),  centdir);
       //Normalize before sabing for visualization purposes
-        NormalizeByBinWidth(hRun3Xi);
+        NormalizeByBinWidth(hXiCorrectedSpectrumInput);
         NormalizeByBinWidth(hGenXiSign);
         NormalizeByBinWidth(hGenXiNeutral);
       //NormalizeByBinWidth(hFeeddownXiSignMatrix);
@@ -836,7 +1140,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
       ////////////////////////////////////////////////////
         safeWriteObject(hFromXiSignSpectrum,Form("%s Feeddown from %s Spectrum", particle.c_str(), xiSignName.c_str()),centdir);
         safeWriteObject(hFromXiNeutralSpectrum,Form("%s Feeddown from %s Spectrum", particle.c_str(), xiNeutralName.c_str()),centdir);
-        safeWriteObject(hRun3Xi, Form("%s Corrected Run 3 Xi Spectrum Used for Feeddown", particle.c_str()), centdir);
+        safeWriteObject(hXiCorrectedSpectrumInput, Form("%s Corrected Run 3 Xi Spectrum Used for Feeddown", particle.c_str()), centdir);
         safeWriteObject(hGenXiSign, Form("%s Generated %s Spectrum Used for Feeddown", particle.c_str(), xiSignName.c_str()),centdir);
         safeWriteObject(hGenXiNeutral, Form("%s Generated %s Spectrum Used for Feeddown", particle.c_str(), xiNeutralName.c_str()),centdir);
         safeWriteObject(hFeeddownXiSignMatrix, Form("%s from %s Feeddown Matrix Used for Feeddown", particle.c_str(),  xiSignName.c_str()),centdir);
@@ -855,28 +1159,23 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 //*********************************************************************************************************************************************************************************************************************************************************************/
 int PtSpectrumV0sCent(){  
    //AO2D Files to be accessed configuqration
-    InitAO2DFiles(); //Initiates which file will be used in AnalysisLibrary.cxx
+    InitAO2DFiles();
 
    //Particles to be processed
    //********************************************************************************/
    //********************************************************************************/
-   std::vector<std::string> particles = {"K0sh", "Lambda", "AntiLambda"};
-   //std::vector<std::string> particles = {"K0sh"};
+   //std::vector<std::string> particles = {"K0sh", "Lambda", "AntiLambda"};
+   std::vector<std::string> particles = {"K0sh"};
    //std::vector<std::string> particles = {"Lambda"};
    //std::vector<std::string> particles = {"AntiLambda"};
    //std::vector<std::string> particles = {"Lambda", "AntiLambda"};
     bool NchAnalysis = true; //Run Nch Alysis
    //********************************************************************************/
    //********************************************************************************/
-   //Energy of collision to be processed
-    TString energy = "13.6_TeV";
-   //TString energy = "5.36_TeV";
-   //********************************************************************************/
-   //********************************************************************************/
    //File Where Everything will be Saved
-    TString outputRootFile = "V0s_Pt_Spectrum_Cent_"+energy+".root";
+    TString outputRootFile = "V0s_Pt_Spectrum_Cent_"+AO2DFiles.energy+".root";
     TFile *F1 = new TFile(outputRootFile, "RECREATE");
-      //********************************************************************************/
+    //********************************************************************************/
 
     int romanIndex = 0;
    // Color palette
@@ -939,7 +1238,7 @@ int PtSpectrumV0sCent(){
                 centralityCounter++;
             }
          
-            PlotSignal(particle, *ptBins, F1, AO2DFiles, centDir, cent_low, cent_high, centralityIndex, energy); //Plots Signal for each centrality bin within particle directory
+            PlotSignal(particle, *ptBins, F1, AO2DFiles, centDir, cent_low, cent_high, centralityIndex); //Plots Signal for each centrality bin within particle directory
 
       // Go back to particle directory
             F1->cd(particle.c_str());
@@ -967,6 +1266,7 @@ int PtSpectrumV0sCent(){
         int colorIndex = 0;
       // store histograms for drawing
         std::vector<TH1F*> hCorrectedStorage;
+        std::vector<TH1F*> hGeneratedStorage;
         std::vector<TH1F*> hEfficiencyStorage;
         std::vector<TH1F*> hSignalSplittingStorage;
         std::vector<TH1F*> hSignalLossStorage;
@@ -981,9 +1281,14 @@ int PtSpectrumV0sCent(){
         std::vector<TH1F*> hTotalFeeddownFractionStorage;
         std::vector<TH1F*> hFromXiSignSpectrumStorage;
         std::vector<TH1F*> hFromXiNeutralSpectrumStorage;
-        std::vector<TH1F*> hRun3XiStorage;
+        std::vector<TH1F*> hXiCorrectedSpectrumInputStorage;
         std::vector<TH1F*> hGenXiSignStorage, hGenXiNeutralStorage;
         std::vector<TH1F*> hFeeddownXiSignMatrixStorage, hFeeddownXiNeutralMatrixStorage;
+        std::vector<TH1F*> hRatioAlphaStorage;
+        std::vector<TH1F*> hNEventsStorage;
+        std::vector<TH1F*> hNV0sStorage;
+        std::vector<TH1F*> hNParticlesStorage;
+        std::vector<TH1F*> hPeakStorage, hWidthStorage;
         //std::vector<TF1*> fLevyTsallisLambdaStorage, fLevyTsallisAntiLambdaStorage; NOT NEEDED?
 
       // Load Centrality Histograms to Superimpose
@@ -998,12 +1303,20 @@ int PtSpectrumV0sCent(){
         LoadCentralityHistograms(F1, particle, "Event Splitting", *centBins, hEventSplittingStorage);
         LoadCentralityHistograms(F1, particle, "MC Reconstructed Pt Spectrum", *centBins, hReconstructedMCStorage);
         LoadCentralityHistograms(F1, particle, "Different Event Corrections", *centBins, hNEventGenStorage);
+        LoadCentralityHistograms(F1, particle, "Generated Pt Spectrum", *centBins, hGeneratedStorage);
+        LoadCentralityHistograms(F1, particle, "Ratio Alpha Test", *centBins, hRatioAlphaStorage);
+        LoadCentralityHistograms(F1, particle, "Number of Events", *centBins, hNEventsStorage);
+        LoadCentralityHistograms(F1, particle, "Number of V0s", *centBins, hNV0sStorage);
+        LoadCentralityHistograms(F1, particle, "Number of Particles", *centBins, hNParticlesStorage);
+        LoadCentralityHistograms(F1, particle, "Peak vs Pt Quality Control", *centBins, hPeakStorage);
+        LoadCentralityHistograms(F1, particle, "Width vs Pt Quality Control", *centBins, hWidthStorage);
+
         if (particle == "Lambda") {
             LoadCentralityHistograms(F1, particle, "Total Feeddown", *centBins, hTotalFeeddownStorage);
             LoadCentralityHistograms(F1, particle, "Total Feeddown Fraction", *centBins, hTotalFeeddownFractionStorage);
             LoadCentralityHistograms(F1, particle, "Feeddown from XiMinus Spectrum", *centBins, hFromXiSignSpectrumStorage);
             LoadCentralityHistograms(F1, particle, "Feeddown from XiZero Spectrum", *centBins, hFromXiNeutralSpectrumStorage);
-            LoadCentralityHistograms(F1, particle, "Corrected Run 3 Xi Spectrum Used for Feeddown", *centBins, hRun3XiStorage);
+            LoadCentralityHistograms(F1, particle, "Corrected Run 3 Xi Spectrum Used for Feeddown", *centBins, hXiCorrectedSpectrumInputStorage);
             LoadCentralityHistograms(F1, particle, "Generated XiMinus Spectrum Used for Feeddown", *centBins, hGenXiSignStorage);
             LoadCentralityHistograms(F1, particle, "Generated XiZero Spectrum Used for Feeddown", *centBins, hGenXiNeutralStorage);
             LoadCentralityHistograms(F1, particle, "from XiMinus Feeddown Matrix Used for Feeddown", *centBins, hFeeddownXiSignMatrixStorage);
@@ -1019,7 +1332,7 @@ int PtSpectrumV0sCent(){
             LoadCentralityHistograms(F1, particle, "Total Feeddown Fraction", *centBins, hTotalFeeddownFractionStorage);
             LoadCentralityHistograms(F1, particle, "Feeddown from XiPlus Spectrum", *centBins, hFromXiSignSpectrumStorage);
             LoadCentralityHistograms(F1, particle, "Feeddown from AntiXiZero Spectrum", *centBins, hFromXiNeutralSpectrumStorage);
-            LoadCentralityHistograms(F1, particle, "Corrected Run 3 Xi Spectrum Used for Feeddown", *centBins, hRun3XiStorage);
+            LoadCentralityHistograms(F1, particle, "Corrected Run 3 Xi Spectrum Used for Feeddown", *centBins, hXiCorrectedSpectrumInputStorage);
             LoadCentralityHistograms(F1, particle, "Generated XiPlus Spectrum Used for Feeddown", *centBins, hGenXiSignStorage);
             LoadCentralityHistograms(F1, particle, "Generated AntiXiZero Spectrum Used for Feeddown", *centBins, hGenXiNeutralStorage);
             LoadCentralityHistograms(F1, particle, "from XiPlus Feeddown Matrix Used for Feeddown", *centBins, hFeeddownXiSignMatrixStorage);
@@ -1045,13 +1358,20 @@ int PtSpectrumV0sCent(){
         TCanvas* cEvSplit = DrawCentralityHistoSet(hEventSplittingStorage, roman, colors, *centBins,"Event_Splitting_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
         TCanvas* cRecoMC = DrawCentralityHistoSet(hReconstructedMCStorage, roman, colors, *centBins,"ReconstructedMC_PtSpectrum_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
         TCanvas* cEvent = DrawCentralityHistoSet(hNEventGenStorage, roman, colors, *centBins,"NEventsGen_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
-      
+        TCanvas* cGen = DrawCentralityHistoSet(hGeneratedStorage, roman, colors, *centBins,"NGenerated_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cAlphaTestRatio = DrawCentralityHistoSet(hRatioAlphaStorage, roman, colors, *centBins,"Ratio_Alpha_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cNEvents = DrawCentralityHistoSet(hNEventsStorage, roman, colors, *centBins,"Number_Events_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cNV0s = DrawCentralityHistoSet(hNV0sStorage, roman, colors, *centBins,"Number_V0s_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cNParticles = DrawCentralityHistoSet(hNParticlesStorage, roman, colors, *centBins,"Number_Particles_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cPeak = DrawCentralityHistoSet(hPeakStorage, roman, colors, *centBins,"Peak_vs_Pt_Quality_Control_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cWidth = DrawCentralityHistoSet(hWidthStorage, roman, colors, *centBins,"Width_vs_Pt_Quality_Control_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+
       //Feeddown only for Lambda and AntiLambda
         TCanvas* cFeeddown = nullptr;
         TCanvas* cFeeddownFraction = nullptr;
         TCanvas* cFeeddownXiSign = nullptr;
         TCanvas* cFeeddownXiNeutral = nullptr;
-        TCanvas* cRun3Xi = nullptr;
+        TCanvas* cXiInput = nullptr;
         TCanvas* cGenXiSign = nullptr;
         TCanvas* cGenXiNeutral = nullptr;
         TCanvas* cFeeddownXiSignMatrix = nullptr;
@@ -1061,7 +1381,7 @@ int PtSpectrumV0sCent(){
             cFeeddownFraction = DrawCentralityHistoSet(hTotalFeeddownFractionStorage, roman, colors, *centBins,"Total_Feeddown_Fraction_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiSign = DrawCentralityHistoSet(hFromXiSignSpectrumStorage, roman, colors, *centBins,"Feeddown_XiMinus_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiNeutral = DrawCentralityHistoSet(hFromXiNeutralSpectrumStorage, roman, colors, *centBins,"Feeddown_XiZero_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
-            cRun3Xi = DrawCentralityHistoSet(hRun3XiStorage, roman, colors, *centBins,"Run3_Xi_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+            cXiInput = DrawCentralityHistoSet(hXiCorrectedSpectrumInputStorage, roman, colors, *centBins,"Xi_Input_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cGenXiSign = DrawCentralityHistoSet(hGenXiSignStorage, roman, colors, *centBins,"Generated_XiSign_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cGenXiNeutral = DrawCentralityHistoSet(hGenXiNeutralStorage, roman, colors, *centBins,"Generated_XiNeutral_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiSignMatrix = DrawCentralityHistoSet(hFeeddownXiSignMatrixStorage, roman, colors, *centBins,"Feeddown_XiSign_Matrix_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
@@ -1072,7 +1392,7 @@ int PtSpectrumV0sCent(){
             cFeeddownFraction = DrawCentralityHistoSet(hTotalFeeddownFractionStorage, roman, colors, *centBins,"Total_Feeddown_Fraction_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiSign = DrawCentralityHistoSet(hFromXiSignSpectrumStorage, roman, colors, *centBins,"Feeddown_XiPlus_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiNeutral = DrawCentralityHistoSet(hFromXiNeutralSpectrumStorage, roman, colors, *centBins,"Feeddown_AntiXiZero_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
-            cRun3Xi = DrawCentralityHistoSet(hRun3XiStorage, roman, colors, *centBins,"Run3_Xi_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+            cXiInput = DrawCentralityHistoSet(hXiCorrectedSpectrumInputStorage, roman, colors, *centBins,"Xi_Input_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cGenXiSign = DrawCentralityHistoSet(hGenXiSignStorage, roman, colors, *centBins,"Generated_XiSign_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cGenXiNeutral = DrawCentralityHistoSet(hGenXiNeutralStorage, roman, colors, *centBins,"Generated_XiNeutral_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
             cFeeddownXiSignMatrix = DrawCentralityHistoSet(hFeeddownXiSignMatrixStorage, roman, colors, *centBins,"Feeddown_XiSign_Matrix_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
@@ -1086,31 +1406,55 @@ int PtSpectrumV0sCent(){
       //
       //
       // Particle Specific Files
-        TString run2File, run2Dir, run2Graph,legendName, francescaFile;
-        TString francescaHist = "hPtCorrected";
+        TString run2File, run2Dir, run2Graph,legendName;
 
       // Access comparison files (lambda and lambdabar use the same)
         if (particle == "K0sh") {
-            run2File = "HEPDataINELgt0K0sh.root";
-            run2Dir= "Table 1";
-            run2Graph   = "Graph1D_y11";
-            francescaFile = "Results_K0Short_LHC22apass7_LHC24f3c_MultDepEff_FT0M0100.root";
+
             legendName = "K^{0}_{S}";
+
+            if (AO2DFiles.dataperiod == "ppref24") {
+                run2File  = "HEPData502Paper_ModifiedXi.root";
+                run2Dir   = "Figure 1a";
+                run2Graph = "Graph1D_y12";
+            }
+            else if (AO2DFiles.dataperiod == "pp24" || AO2DFiles.dataperiod == "pp22o") {
+                run2File  = "HEPDataINELgt0K0sh.root";
+                run2Dir   = "Table 1";
+                run2Graph = "Graph1D_y11";
+            }
         }
-        if (particle == "Lambda") {
-            run2File = "HEPDataINELgt0Lambda.root";
-            run2Dir= "Table 1";
-            run2Graph   = "Graph1D_y11";
-            francescaFile = "Results_Lambda.root";
+        
+        else if (particle == "Lambda") {
+
             legendName = "#Lambda + #bar{#Lambda}";
+
+            if (AO2DFiles.dataperiod == "ppref24") {
+                run2File  = "HEPData502Paper_ModifiedXi.root";
+                run2Dir   = "Figure 1b";
+                run2Graph = "Graph1D_y12";
+            }
+            else if (AO2DFiles.dataperiod == "pp24" || AO2DFiles.dataperiod == "pp22o") {
+                run2File  = "HEPDataINELgt0Lambda.root";
+                run2Dir   = "Table 2";
+                run2Graph = "Graph1D_y11";
+            }
         }
 
-        if (particle == "AntiLambda") {
-            run2File = "HEPDataINELgt0AntiLambda.root";
-            run2Dir= "Table 1";
-            run2Graph   = "Graph1D_y11";
-            francescaFile = "Results_AntiLambda.root";
+        else if (particle == "AntiLambda") {
+
             legendName = "#Lambda + #bar{#Lambda}";
+
+            if (AO2DFiles.dataperiod == "ppref24") {
+                run2File  = "HEPData502Paper_ModifiedXi.root";
+                run2Dir   = "Figure 1b";
+                run2Graph = "Graph1D_y12";
+            }
+            else if (AO2DFiles.dataperiod == "pp24" || AO2DFiles.dataperiod == "pp22o") {
+                run2File  = "HEPDataINELgt0AntiLambda.root";
+                run2Dir   = "Table 2";
+                run2Graph = "Graph1D_y11";
+            }
         }
 
         cPt->cd();
@@ -1157,17 +1501,26 @@ int PtSpectrumV0sCent(){
         if(cEff) cEff->Write();
         if(cUltEff) cUltEff->Write();
         if(cSigSplit) cSigSplit->Write();
+        if(cSigLoss) cSigLoss->Write();
         if(cEvEff) cEvEff->Write();
         if(cEvSplit) cEvSplit->Write();
         if(cRaw) cRaw->Write();
         if(cRecoMC) cRecoMC->Write();
+        if(cGen) cGen->Write();
         if(cEvent) cEvent->Write();
+        if(cAlphaTestRatio) cAlphaTestRatio->Write();
+        if(cNEvents) cNEvents->Write();
+        if(cNV0s) cNV0s->Write();
+        if(cNParticles) cNParticles->Write();
+        if(cPeak) cPeak->Write();
+        if(cWidth) cWidth->Write();
+
         if (particle == "Lambda" || particle == "AntiLambda") {
             if(cFeeddown) cFeeddown->Write();
             if(cFeeddownFraction) cFeeddownFraction->Write();
             if(cFeeddownXiSign) cFeeddownXiSign->Write();
             if(cFeeddownXiNeutral) cFeeddownXiNeutral->Write();
-            if(cRun3Xi) cRun3Xi->Write();
+            if(cXiInput) cXiInput->Write();
             if(cGenXiSign) cGenXiSign->Write();
             if(cGenXiNeutral) cGenXiNeutral->Write();
             if(cFeeddownXiSignMatrix) cFeeddownXiSignMatrix->Write();
@@ -1426,20 +1779,16 @@ int PtSpectrumV0sCent(){
       //////////////////////////////////////////////////////////////////////////////////
       //
       //
-            TString run2FileK0sh = "HEPDataINELgt0K0sh.root"; //https://www.hepdata.net/record/ins1748157?version=1
-            TString run2DirK0sh = "Table 1";
-            TString run2GraphK0sh = "Graph1D_y11";
-            TString francescaFileK0sh = "Results_K0Short_LHC22apass7_LHC24f3c_MultDepEff_FT0M0100.root";
-            TString francescaHistK0sh = "hPtCorrected";
+
             TString legendNameK0sh = "K^{0}_{S}";
 
-            TFile *fileGraphK0sh = TFile::Open(run2FileK0sh);  
+            TFile *fileGraphK0sh = TFile::Open(run2File);  
             if (!fileGraphK0sh) { std::cerr << "Error: Cannot open K0sh graph file.\n"; return 0; }
 
-            TDirectory *dirK0sh = (TDirectory*)fileGraphK0sh->Get(run2DirK0sh);  
+            TDirectory *dirK0sh = (TDirectory*)fileGraphK0sh->Get(run2Dir);  
             if (!dirK0sh) { std::cerr << "Error: K0sh directory not found.\n"; return 0; }
 
-            TGraph *gExternalK0sh = (TGraph*)dirK0sh->Get(run2GraphK0sh);
+            TGraph *gExternalK0sh = (TGraph*)dirK0sh->Get(run2Graph);
             if (!gExternalK0sh) { std::cerr << "Error: K0sh TGraph not found.\n"; return 0; }
 
       // Prepare new canvas with ratio pad
@@ -1463,7 +1812,8 @@ int PtSpectrumV0sCent(){
             hK0shCorrectedCompare->SetMarkerColor(kBlue+1);
             hK0shCorrectedCompare->SetMarkerSize(1);
             hK0shCorrectedCompare->GetYaxis()->SetTitle("1/N_{INEL>0} #times d^{2}N/(dp_{T}dy) [(GeV/c)^{-1}]");
-            hK0shCorrectedCompare->GetXaxis()->SetRangeUser(0.0,8.0); 
+            //hK0shCorrectedCompare->GetXaxis()->SetRangeUser(0.0,6.5);
+            hK0shCorrectedCompare->GetXaxis()->SetLimits(0.0, 6.5);  
             hK0shCorrectedCompare->Draw("PE");
 
             gExternalK0sh->SetLineColor(kGreen+2);
@@ -1477,7 +1827,7 @@ int PtSpectrumV0sCent(){
             legendcompareK0sh->SetBorderSize(0);
             legendcompareK0sh->SetFillColor(kWhite);
             legendcompareK0sh->AddEntry(hK0shCorrectedCompare, legendNameK0sh + " Corrected p_{T} Spectrum", "lp");
-            legendcompareK0sh->AddEntry(gExternalK0sh, "ALICE 2020 (#sqrt{#it{s}} = 13 TeV)", "pl");
+            legendcompareK0sh->AddEntry(gExternalK0sh, "ALICE 2025 (#sqrt{#it{s}} = 5.02 TeV)", "pl");
             legendcompareK0sh->Draw();
 
       // Label
@@ -1485,7 +1835,7 @@ int PtSpectrumV0sCent(){
             latexK0sh->SetNDC();
             latexK0sh->SetTextSize(0.03);
             latexK0sh->DrawLatex(0.65, 0.65, "pp");
-            TString textlatexK0sh = "#sqrt{#it{s}} = " + energy;
+            TString textlatexK0sh = "#sqrt{#it{s}} = " + AO2DFiles.energy;
             latexK0sh->DrawLatex(0.65, 0.60, textlatexK0sh.Data());
             latexK0sh->DrawLatex(0.65, 0.55, "|y| < 0.5");
 
@@ -1545,385 +1895,278 @@ int PtSpectrumV0sCent(){
             gDirectory->cd("Comparisons");
             cCompareRun2K0sh->Update();
             cCompareRun2K0sh->Write();
-      //
-      //
-      /////////////////////////////////////////////////////////////////////////////////
-      //Comparison K0shs to Francesca
-      //////////////////////////////////////////////////////////////////////////////////
-      //
-      //
-            TFile *ResultsFrancescaK0sh = TFile::Open(francescaFileK0sh);  
-            if (!ResultsFrancescaK0sh || ResultsFrancescaK0sh->IsZombie()) {
-                std::cerr << "Error: Cannot open Francesca K0sh file: " << francescaFileK0sh << "\n";
-                return 0;
-            }
-
-            TH1D *hFrancescaK0sh = (TH1D*)ResultsFrancescaK0sh->Get(francescaHistK0sh);
-            if (!hFrancescaK0sh) {
-                std::cerr << "Error: Francesca Histogram '" << francescaHistK0sh << "' not found.\n";
-                return 0;
-            }
-
-      // Prepare new canvas with ratio pad
-            TCanvas *cCompareFranK0sh = new TCanvas("cCompareFran_K0sh", "Comparison K0shs to Francesca", 800, 800);
-            TPad *pad1_FranK0sh = new TPad("pad1_Fran_K0sh", "Main pad", 0, 0.3, 1, 1.0);
-            TPad *pad2_FranK0sh = new TPad("pad2_Fran_K0sh", "Ratio pad", 0, 0.05, 1, 0.3);
-            pad1_FranK0sh->Draw();
-            pad2_FranK0sh->Draw();
-
-      // -- Draw top pad --
-            pad1_FranK0sh->cd();
-            gStyle->SetOptTitle(0);
-            gStyle->SetOptStat(0);
-            pad1_FranK0sh->SetLogy(1);
-            pad1_FranK0sh->SetTickx(1);
-            pad1_FranK0sh->SetTicky(1);
-            pad1_FranK0sh->SetBottomMargin(0.01);
-
-            hK0shCorrectedCompare->Draw("PE");
-            hK0shCorrectedCompare->GetXaxis()->SetRangeUser(0.0,8.0);
-
-            hFrancescaK0sh->SetLineColor(kTeal+2);
-            hFrancescaK0sh->SetMarkerColor(kTeal+2);
-            hFrancescaK0sh->SetMarkerStyle(22);
-            hFrancescaK0sh->Draw("SAME PE");
-
-      // Legend
-            TLegend* legendcompareFranK0sh = new TLegend(0.55, 0.70, 0.88, 0.88);
-            legendcompareFranK0sh->SetTextSize(0.03);
-            legendcompareFranK0sh->SetBorderSize(0);
-            legendcompareFranK0sh->SetFillColor(kWhite);
-            legendcompareFranK0sh->AddEntry(hK0shCorrectedCompare, legendNameK0sh + " Corrected p_{T} Spectrum", "lp");
-            TString textCompareFranK0sh = "Main Analysis " + energy;
-            legendcompareFranK0sh->AddEntry(hFrancescaK0sh, textCompareFranK0sh, "pl");
-            legendcompareFranK0sh->Draw();
-
-      // Labels
-            TLatex *latexFranK0sh = new TLatex();
-            latexFranK0sh->SetNDC();
-            latexFranK0sh->SetTextSize(0.03);
-            latexFranK0sh->DrawLatex(0.65, 0.65, "pp");
-            latexFranK0sh->DrawLatex(0.65, 0.60, "#sqrt{#it{s}} = " + energy);
-            latexFranK0sh->DrawLatex(0.65, 0.55, "|y| < 0.5");
-
-      // -- Bottom pad: ratio --
-            pad2_FranK0sh->cd();
-            gPad->SetTopMargin(0.01);
-            gPad->SetBottomMargin(0.3);
-            gPad->SetGridy();
-
-            TH1D *hRatioFranK0sh = (TH1D*)hK0shCorrectedCompare->Clone("hRatioFranK0sh");
-            int nbinsFranK0sh = hRatioFranK0sh->GetNbinsX();
-            int firstValidK0sh = 3;
-            int lastValidK0sh = nbinsFranK0sh - 9;
-
-            for (int i = 1; i <= nbinsFranK0sh; ++i) {
-                double num = hRatioFranK0sh->GetBinContent(i);
-                double den = hFrancescaK0sh->GetBinContent(i-2);
-                if (i >= firstValidK0sh && i <= lastValidK0sh && den != 0) {
-                    hRatioFranK0sh->SetBinContent(i, num / den);
-                    double err = hRatioFranK0sh->GetBinError(i);
-                    double denErr = hFrancescaK0sh->GetBinError(i-2);
-                    double newErr = num / den * std::sqrt( std::pow(err/num,2) + std::pow(denErr/den,2) );
-                    hRatioFranK0sh->SetBinError(i, newErr);
-                } else {
-                    hRatioFranK0sh->SetBinContent(i, 0);
-                    hRatioFranK0sh->SetBinError(i, 0);
-                }
-            }
-
-            hRatioFranK0sh->SetTitle("");
-            hRatioFranK0sh->GetYaxis()->SetTitle("My Results / Main Analysis");
-            hRatioFranK0sh->GetXaxis()->SetTitle("p_{T} (GeV/c)");
-            hRatioFranK0sh->SetMarkerStyle(33);
-            hRatioFranK0sh->SetMarkerSize(1);
-            hRatioFranK0sh->SetMarkerColor(kCyan+2);
-            hRatioFranK0sh->SetLineColor(kCyan+2);
-            hRatioFranK0sh->GetYaxis()->SetTitleSize(0.08);
-            hRatioFranK0sh->GetYaxis()->SetTitleOffset(0.5);
-            hRatioFranK0sh->GetYaxis()->SetLabelSize(0.08);
-            hRatioFranK0sh->GetXaxis()->SetLabelSize(0.08);
-            hRatioFranK0sh->GetXaxis()->SetTitleSize(0.10);
-            hRatioFranK0sh->GetXaxis()->SetTitleOffset(1.0);
-            hRatioFranK0sh->GetXaxis()->SetRangeUser(0.0,8.0);
-            hRatioFranK0sh->Draw("PE");
-
-            F1->cd();
-            gDirectory->cd("Comparisons");
-            cCompareFranK0sh->Update();
-            cCompareFranK0sh->Write();
         } //K0sh Comparisons
       /////////////////////////////////////////////////////////////////
       //Lambda+AntiLambda Sum Comparisons Done Together 
         if (lambdaProcessed && antiLambdaProcessed) { //First the Lambdas must be analysed and then the AntiLambdas
          
 
-    // ============================================================
-// Lambda + AntiLambda Pt Spectra + Levy-Tsallis Fits
-// ============================================================
+        // ============================================================
+        // Lambda + AntiLambda Pt Spectra + Levy-Tsallis Fits
+        // ============================================================
 
-// Storage: build combined spectra
-std::vector<TH1F*> hLambdaPlusAntiLambdaStorage;
-std::vector<TF1*>  fLevyTsallisLambdaPlusAntiLambdaStorage;
+        // Storage: build combined spectra
+        std::vector<TH1F*> hLambdaPlusAntiLambdaStorage;
+        std::vector<TF1*>  fLevyTsallisLambdaPlusAntiLambdaStorage;
 
-// Mass
-double mParticle = 1.115683;
+        // Mass
+        double mParticle = 1.115683;
 
-// ============================================================
-// 1. BUILD (Lambda + AntiLambda) PER CENTRALITY BIN
-// ============================================================
+        // ============================================================
+        // 1. BUILD (Lambda + AntiLambda) PER CENTRALITY BIN
+        // ============================================================
 
-for (size_t i = 0; i < hPtSpectrumCorrectedLambdaStorage.size(); ++i) {
+        for (size_t i = 0; i < hPtSpectrumCorrectedLambdaStorage.size(); ++i) {
 
-    TH1F* hLambda = hPtSpectrumCorrectedLambdaStorage[i];
-    TH1F* hAntiLambda = hPtSpectrumCorrectedAntiLambdaStorage[i];
+            TH1F* hLambda = hPtSpectrumCorrectedLambdaStorage[i];
+            TH1F* hAntiLambda = hPtSpectrumCorrectedAntiLambdaStorage[i];
 
-    TH1F* hSum = (TH1F*)hLambda->Clone(Form("hLambdaPlusAntiLambda_cent_%zu", i));
-    hSum->SetDirectory(0);
-    hSum->Reset();
+            TH1F* hSum = (TH1F*)hLambda->Clone(Form("hLambdaPlusAntiLambda_cent_%zu", i));
+            hSum->SetDirectory(0);
+            hSum->Reset();
 
-    hSum->Add(hLambda);
-    hSum->Add(hAntiLambda);
+            hSum->Add(hLambda);
+            hSum->Add(hAntiLambda);
 
-    hLambdaPlusAntiLambdaStorage.push_back(hSum);
-}
-
-// ============================================================
-// 2. CANVAS: SPECTRA + FITS + INEL SUM + RATIO TO FIT
-// ============================================================
-
-TCanvas* cLambdaAntiLambdaSpecFit = new TCanvas("cLambdaAntiLambdaSpecFit", "Lambda+AntiLambda Pt Spectra",800, 800);
-
-TPad* pad1 = new TPad("pad1","pad1",0,0.3,1,1);
-TPad* pad2 = new TPad("pad2","pad2",0,0,1,0.3);
-
-pad1->SetBottomMargin(0.02);
-pad2->SetTopMargin(0.05);
-pad2->SetBottomMargin(0.3);
-
-pad1->Draw();
-pad2->Draw();
-
-// ------------------------
-// Pad 1: spectra + fits
-// ------------------------
-pad1->cd();
-pad1->SetLogy();
-
-TLegend* leg = new TLegend(0.60,0.55,0.88,0.88);
-leg->SetBorderSize(0);
-
-// INEL sum
-TH1F* hSum = (TH1F*)hLambdaPlusAntiLambdaStorage[0]->Clone("hSum_Lambda");
-hSum->Reset();
-hSum->SetDirectory(0);
-
-// Levy function (same form as yours)
-TF1* levySum = new TF1("levySum","x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.)))))""* pow(1.+((sqrt(pow([3],2.)+pow(x,2.))-[3])/([1]*[2])), -[1])",0.0, 14.0);
-
-levySum->FixParameter(3, mParticle);
-levySum->SetParameters(1.0, 7.0, 0.25);
-levySum->SetParLimits(0, 0.01, 5.0);
-levySum->SetParLimits(1, 3.0, 20.0);
-levySum->SetParLimits(2, 0.1, 0.6);
-
-// loop centrality bins
-for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
-
-    double cent_low  = (*nCentBinsLambdas)[i];
-    double cent_high = (*nCentBinsLambdas)[i+1];
-
-    TH1F* h = hLambdaPlusAntiLambdaStorage[i];
-
-    // draw spectrum
-    h->SetMarkerStyle(20);
-    h->SetMarkerColor(colors[i % colors.size()]);
-    h->SetLineColor(colors[i % colors.size()]);
-
-    h->Draw(i==0 ? "E" : "E SAME");
-
-    // fit
-    TF1* f = (TF1*)levySum->Clone(Form("levy_cent_%zu", i));
-    f->SetLineColor(colors[i % colors.size()]);
-    f->SetLineWidth(2);
-
-    h->Fit(f, "RQ0"); // quiet fit
-
-    fLevyTsallisLambdaPlusAntiLambdaStorage.push_back(f);
-
-    f->Draw("L SAME");
-
-    leg->AddEntry(h, Form("%s (%.0f-%.0f%%)",roman[i].Data(),cent_low, cent_high),"lep");
-
-    // build INEL sum (weighted like your K0s code)
-    double weight = (cent_high - cent_low) / 100.0;
-
-    TH1F* tmp = (TH1F*)h->Clone();
-    tmp->Scale(weight);
-    hSum->Add(tmp);
-    delete tmp;
-}
-
-// fit INEL sum
-hSum->SetMarkerStyle(kFullDiamond);
-hSum->SetMarkerColor(kBlack);
-hSum->SetLineColor(kBlack);
-hSum->Draw("E SAME");
-
-hSum->Fit(levySum, "RQ0");
-
-levySum->SetLineColor(kBlack);
-levySum->SetLineWidth(3);
-levySum->Draw("L SAME");
-
-leg->AddEntry(hSum, "INEL sum", "lep");
-leg->AddEntry(levySum, "INEL fit", "l");
-
-leg->Draw();
-
-// ------------------------
-// Pad 2: ratio to fit
-// ------------------------
-pad2->cd();
-
-for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
-
-    TH1F* ratio = (TH1F*)hLambdaPlusAntiLambdaStorage[i]->Clone(
-        Form("ratio_%zu", i));
-
-    for (int b = 1; b <= ratio->GetNbinsX(); ++b) {
-
-        double x = ratio->GetBinCenter(b);
-        double fval = fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Eval(x);
-
-        if (fval > 0) {
-            ratio->SetBinContent(b, ratio->GetBinContent(b)/fval);
-            ratio->SetBinError(b, ratio->GetBinError(b)/fval);
-        } else {
-            ratio->SetBinContent(b, 0);
-            ratio->SetBinError(b, 0);
+            hLambdaPlusAntiLambdaStorage.push_back(hSum);
         }
-    }
 
-    ratio->SetMarkerStyle(20);
-    ratio->SetMarkerColor(colors[i % colors.size()]);
-    ratio->SetLineColor(colors[i % colors.size()]);
+        // ============================================================
+        // 2. CANVAS: SPECTRA + FITS + INEL SUM + RATIO TO FIT
+        // ============================================================
 
-    ratio->GetYaxis()->SetTitle("Ratio to Fit");
-    ratio->GetYaxis()->SetRangeUser(0.5, 1.5);
+        TCanvas* cLambdaAntiLambdaSpecFit = new TCanvas("cLambdaAntiLambdaSpecFit", "Lambda+AntiLambda Pt Spectra",800, 800);
 
-    ratio->Draw(i==0 ? "E" : "E SAME");
-}
+        TPad* pad1 = new TPad("pad1","pad1",0,0.3,1,1);
+        TPad* pad2 = new TPad("pad2","pad2",0,0,1,0.3);
 
-// INEL ratio
-TH1F* ratioSum = (TH1F*)hSum->Clone("ratioSum");
+        pad1->SetBottomMargin(0.02);
+        pad2->SetTopMargin(0.05);
+        pad2->SetBottomMargin(0.3);
 
-for (int b = 1; b <= ratioSum->GetNbinsX(); ++b) {
+        pad1->Draw();
+        pad2->Draw();
 
-    double x = ratioSum->GetBinCenter(b);
-    double fval = levySum->Eval(x);
+        // ------------------------
+        // Pad 1: spectra + fits
+        // ------------------------
+        pad1->cd();
+        pad1->SetLogy();
 
-    if (fval > 0) {
-        ratioSum->SetBinContent(b, ratioSum->GetBinContent(b)/fval);
-        ratioSum->SetBinError(b, ratioSum->GetBinError(b)/fval);
-    } else {
-        ratioSum->SetBinContent(b, 0);
-        ratioSum->SetBinError(b, 0);
-    }
-}
+        TLegend* leg = new TLegend(0.60,0.55,0.88,0.88);
+        leg->SetBorderSize(0);
 
-ratioSum->SetMarkerColor(kBlack);
-ratioSum->Draw("E SAME");
+        // INEL sum
+        TH1F* hSum = (TH1F*)hLambdaPlusAntiLambdaStorage[0]->Clone("hSum_Lambda");
+        hSum->Reset();
+        hSum->SetDirectory(0);
 
-cLambdaAntiLambdaSpecFit->Write();
+        // Levy function (same form as yours)
+        TF1* levySum = new TF1("levySum","x*[0]*((([1]-1.)*([1]-2.))/(([1]*[2])*(([1]*[2])+([3]*([1]-2.)))))""* pow(1.+((sqrt(pow([3],2.)+pow(x,2.))-[3])/([1]*[2])), -[1])",0.0, 10.0);
+
+        levySum->FixParameter(3, mParticle);
+        levySum->SetParameters(1.0, 7.0, 0.25);
+        levySum->SetParLimits(0, 0.01, 5.0);
+        levySum->SetParLimits(1, 3.0, 20.0);
+        levySum->SetParLimits(2, 0.1, 0.6);
+
+        // loop centrality bins
+        for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
+
+            double cent_low  = (*nCentBinsLambdas)[i];
+            double cent_high = (*nCentBinsLambdas)[i+1];
+
+            TH1F* h = hLambdaPlusAntiLambdaStorage[i];
+
+            // draw spectrum
+            h->SetMarkerStyle(20);
+            h->SetMarkerColor(colors[i % colors.size()]);
+            h->SetLineColor(colors[i % colors.size()]);
+
+            h->Draw(i==0 ? "E" : "E SAME");
+
+            // fit
+            TF1* f = (TF1*)levySum->Clone(Form("levy_cent_%zu", i));
+            f->SetLineColor(colors[i % colors.size()]);
+            f->SetLineWidth(2);
+
+            h->Fit(f, "RQ0"); // quiet fit
+
+            fLevyTsallisLambdaPlusAntiLambdaStorage.push_back(f);
+
+            f->Draw("L SAME");
+
+            leg->AddEntry(h, Form("%s (%.0f-%.0f%%)",roman[i].Data(),cent_low, cent_high),"lep");
+
+            // build INEL sum (weighted like your K0s code)
+            double weight = (cent_high - cent_low) / 100.0;
+
+            TH1F* tmp = (TH1F*)h->Clone();
+            tmp->Scale(weight);
+            hSum->Add(tmp);
+            delete tmp;
+        }
+
+        // fit INEL sum
+        hSum->SetMarkerStyle(kFullDiamond);
+        hSum->SetMarkerColor(kBlack);
+        hSum->SetLineColor(kBlack);
+        hSum->Draw("E SAME");
+
+        hSum->Fit(levySum, "RQ0");
+
+        levySum->SetLineColor(kBlack);
+        levySum->SetLineWidth(3);
+        levySum->Draw("L SAME");
+
+        leg->AddEntry(hSum, "INEL sum", "lep");
+        leg->AddEntry(levySum, "INEL fit", "l");
+
+        leg->Draw();
+
+        // ------------------------
+        // Pad 2: ratio to fit
+        // ------------------------
+        pad2->cd();
+
+        for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
+
+            TH1F* ratio = (TH1F*)hLambdaPlusAntiLambdaStorage[i]->Clone(
+                Form("ratio_%zu", i));
+
+            for (int b = 1; b <= ratio->GetNbinsX(); ++b) {
+
+                double x = ratio->GetBinCenter(b);
+                double fval = fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Eval(x);
+
+                if (fval > 0) {
+                    ratio->SetBinContent(b, ratio->GetBinContent(b)/fval);
+                    ratio->SetBinError(b, ratio->GetBinError(b)/fval);
+                } else {
+                    ratio->SetBinContent(b, 0);
+                    ratio->SetBinError(b, 0);
+                }
+            }
+
+            ratio->SetMarkerStyle(20);
+            ratio->SetMarkerColor(colors[i % colors.size()]);
+            ratio->SetLineColor(colors[i % colors.size()]);
+
+            ratio->GetYaxis()->SetTitle("Ratio to Fit");
+            ratio->GetYaxis()->SetRangeUser(0.5, 1.5);
+
+            ratio->Draw(i==0 ? "E" : "E SAME");
+        }
+
+        // INEL ratio
+        TH1F* ratioSum = (TH1F*)hSum->Clone("ratioSum");
+
+        for (int b = 1; b <= ratioSum->GetNbinsX(); ++b) {
+
+            double x = ratioSum->GetBinCenter(b);
+            double fval = levySum->Eval(x);
+
+            if (fval > 0) {
+                ratioSum->SetBinContent(b, ratioSum->GetBinContent(b)/fval);
+                ratioSum->SetBinError(b, ratioSum->GetBinError(b)/fval);
+            } else {
+                ratioSum->SetBinContent(b, 0);
+                ratioSum->SetBinError(b, 0);
+            }
+        }
+
+        ratioSum->SetMarkerColor(kBlack);
+        ratioSum->Draw("E SAME");
+
+        cLambdaAntiLambdaSpecFit->Write();
 
 
-// ============================================================
-// 3. SECOND CANVAS: CENTRALITY FITS / INEL FIT
-// ============================================================
+        // ============================================================
+        // 3. SECOND CANVAS: CENTRALITY FITS / INEL FIT
+        // ============================================================
 
-TCanvas* cLambdaAntiLambdaFitComparison = new TCanvas("cLambdaAntiLambdaFitComparison", "Lambda+AntiLambda Fit Ratios", 800, 800);
+        TCanvas* cLambdaAntiLambdaFitComparison = new TCanvas("cLambdaAntiLambdaFitComparison", "Lambda+AntiLambda Fit Ratios", 800, 800);
 
-TPad* pad1b = new TPad("pad1b","pad1b",0,0.3,1,1);
-TPad* pad2b = new TPad("pad2b","pad2b",0,0,1,0.3);
+        TPad* pad1b = new TPad("pad1b","pad1b",0,0.3,1,1);
+        TPad* pad2b = new TPad("pad2b","pad2b",0,0,1,0.3);
 
-pad1b->SetBottomMargin(0.02);
-pad2b->SetTopMargin(0.05);
-pad2b->SetBottomMargin(0.3);
+        pad1b->SetBottomMargin(0.02);
+        pad2b->SetTopMargin(0.05);
+        pad2b->SetBottomMargin(0.3);
 
-pad1b->Draw();
-pad2b->Draw();
+        pad1b->Draw();
+        pad2b->Draw();
 
-// ------------------------
-// Pad 1b
-// ------------------------
-pad1b->cd();
-pad1b->SetLogy();
+        // ------------------------
+        // Pad 1b
+        // ------------------------
+        pad1b->cd();
+        pad1b->SetLogy();
 
-TLegend* leg2 = new TLegend(0.60,0.55,0.88,0.88);
+        TLegend* leg2 = new TLegend(0.60,0.55,0.88,0.88);
 
-for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
+        for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
 
-    TH1F* h = hLambdaPlusAntiLambdaStorage[i];
+            TH1F* h = hLambdaPlusAntiLambdaStorage[i];
 
-    h->SetMarkerColor(colors[i % colors.size()]);
-    h->SetLineColor(colors[i % colors.size()]);
+            h->SetMarkerColor(colors[i % colors.size()]);
+            h->SetLineColor(colors[i % colors.size()]);
 
-    h->Draw(i==0 ? "E" : "E SAME");
+            h->Draw(i==0 ? "E" : "E SAME");
 
-    fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Draw("L SAME");
+            fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Draw("L SAME");
 
-    leg2->AddEntry(h, Form("%s", roman[i].Data()), "lep");
-}
+            leg2->AddEntry(h, Form("%s", roman[i].Data()), "lep");
+        }
 
-// INEL + fit
-hSum->Draw("E SAME");
-levySum->Draw("L SAME");
+        // INEL + fit
+        hSum->Draw("E SAME");
+        levySum->Draw("L SAME");
 
-leg2->AddEntry(hSum, "INEL sum", "lep");
-leg2->AddEntry(levySum, "INEL fit", "l");
+        leg2->AddEntry(hSum, "INEL sum", "lep");
+        leg2->AddEntry(levySum, "INEL fit", "l");
 
-leg2->Draw();
+        leg2->Draw();
 
-// ------------------------
-// Pad 2b: fit ratios
-// ------------------------
-pad2b->cd();
+        // ------------------------
+        // Pad 2b: fit ratios
+        // ------------------------
+        pad2b->cd();
 
-for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
+        for (size_t i = 0; i < hLambdaPlusAntiLambdaStorage.size(); ++i) {
 
-    TH1F* ratioFunc = (TH1F*)hLambdaPlusAntiLambdaStorage[i]->Clone(Form("ratioFunc_%zu", i));
+            TH1F* ratioFunc = (TH1F*)hLambdaPlusAntiLambdaStorage[i]->Clone(Form("ratioFunc_%zu", i));
 
-    ratioFunc->Reset();
+            ratioFunc->Reset();
 
-    for (int b = 1; b <= ratioFunc->GetNbinsX(); ++b) {
+            for (int b = 1; b <= ratioFunc->GetNbinsX(); ++b) {
 
-        double x = ratioFunc->GetBinCenter(b);
+                double x = ratioFunc->GetBinCenter(b);
 
-        double f_cent = fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Eval(x);
-        double f_sum  = levySum->Eval(x);
+                double f_cent = fLevyTsallisLambdaPlusAntiLambdaStorage[i]->Eval(x);
+                double f_sum  = levySum->Eval(x);
 
-        if (f_sum > 0)
-            ratioFunc->SetBinContent(b, f_cent / f_sum);
-        else
-            ratioFunc->SetBinContent(b, 0);
-    }
+                if (f_sum > 0)
+                    ratioFunc->SetBinContent(b, f_cent / f_sum);
+                else
+                    ratioFunc->SetBinContent(b, 0);
+            }
 
-    ratioFunc->SetLineColor(colors[i % colors.size()]);
-    ratioFunc->SetLineWidth(2);
+            ratioFunc->SetLineColor(colors[i % colors.size()]);
+            ratioFunc->SetLineWidth(2);
 
-    ratioFunc->GetYaxis()->SetRangeUser(0,5);
+            ratioFunc->GetYaxis()->SetRangeUser(0,5);
 
-    ratioFunc->Draw(i==0 ? "HIST" : "HIST SAME");
-}
+            ratioFunc->Draw(i==0 ? "HIST" : "HIST SAME");
+        }
 
-// unity line
-TLine* line = new TLine(0.0,1.0,14.0,1.0);
-line->SetLineStyle(2);
-line->SetLineWidth(2);
-line->Draw("SAME");
+        // unity line
+        TLine* line = new TLine(0.0,1.0,14.0,1.0);
+        line->SetLineStyle(2);
+        line->SetLineWidth(2);
+        line->Draw("SAME");
 
-cLambdaAntiLambdaFitComparison->Write();     
+        cLambdaAntiLambdaFitComparison->Write();     
          
          //
          //
@@ -1931,23 +2174,16 @@ cLambdaAntiLambdaFitComparison->Write();
          //Comparison Lambda+LambdaBar to Run2
          //////////////////////////////////////////////////////////////////////////////////
          //
-         //
-            TString run2FileLambda = "HEPDataLambdaCorrectedPtSpectrum.root"; // https://www.hepdata.net/record/ins1748157?version=1
-            TString run2DirLambda = "Table 2";
-            TString run2GraphLambda = "Graph1D_y11";
-            TString francescaFileLambda = "Results_Lambda_LHC22apass7_LHC24f3c_MultDepEff_FT0M0100.root";
-            TString francescaFileAntiLambda = "Results_AntiLambda_LHC22apass7_LHC24f3c_MultDepEff_FT0M0100.root";
-            TString francescaHistLambda = "hPtCorrected";
-            TString francescaHistAntiLambda = "hPtCorrected";
+         // 
             TString legendNameLambda = "#Lambda + #bar{#Lambda}";
 
-            TFile *fileGraphLambda = TFile::Open(run2FileLambda);  
+            TFile *fileGraphLambda = TFile::Open(run2File);  
             if (!fileGraphLambda) { std::cerr << "Error: Cannot open lambda graph file.\n"; return 0; }
 
-            TDirectory *dirLambda = (TDirectory*)fileGraphLambda->Get(run2DirLambda);  
+            TDirectory *dirLambda = (TDirectory*)fileGraphLambda->Get(run2Dir);  
             if (!dirLambda) { std::cerr << "Error: Lambda directory not found.\n"; return 0; }
 
-            TGraph *gExternalLambda = (TGraph*)dirLambda->Get(run2GraphLambda);
+            TGraph *gExternalLambda = (TGraph*)dirLambda->Get(run2Graph);
             if (!gExternalLambda) { std::cerr << "Error: Lambda TGraph not found.\n"; return 0; }
 
          // Prepare new canvas with ratio pad
@@ -1971,7 +2207,8 @@ cLambdaAntiLambdaFitComparison->Write();
             hLambdaPlusAntiLambdaForComparison->SetMarkerColor(kBlue+1);
             hLambdaPlusAntiLambdaForComparison->SetMarkerSize(1);
             hLambdaPlusAntiLambdaForComparison->GetYaxis()->SetTitle("1/N_{INEL>0} #times d^{2}N/(dp_{T}dy) [(GeV/c)^{-1}]");
-            hLambdaPlusAntiLambdaForComparison->GetXaxis()->SetRangeUser(0.0,8.0); 
+            //hLambdaPlusAntiLambdaForComparison->GetXaxis()->SetRangeUser(0.0,8.0);
+            hLambdaPlusAntiLambdaForComparison->GetXaxis()->SetLimits(0.0, 6.5); 
             hLambdaPlusAntiLambdaForComparison->Draw("PE");
 
             gExternalLambda->SetLineColor(kGreen+2);
@@ -1985,7 +2222,7 @@ cLambdaAntiLambdaFitComparison->Write();
             legendcompareLambda->SetBorderSize(0);
             legendcompareLambda->SetFillColor(kWhite);
             legendcompareLambda->AddEntry(hLambdaPlusAntiLambdaForComparison, legendNameLambda + " Corrected p_{T} Spectrum", "lp");
-            legendcompareLambda->AddEntry(gExternalLambda, "ALICE 2020 (#sqrt{#it{s}} = 13 TeV)", "pl");
+            legendcompareLambda->AddEntry(gExternalLambda, "ALICE 2025 (#sqrt{#it{s}} = 5.02 TeV)", "pl");
             legendcompareLambda->Draw();
 
          // Label
@@ -1993,7 +2230,7 @@ cLambdaAntiLambdaFitComparison->Write();
             latexLambda->SetNDC();
             latexLambda->SetTextSize(0.03);
             latexLambda->DrawLatex(0.65, 0.65, "pp");
-            TString textLambda = "#sqrt{#it{s}} = " + energy;
+            TString textLambda = "#sqrt{#it{s}} = " + AO2DFiles.energy;
             latexLambda->DrawLatex(0.65, 0.60, textLambda.Data());
             latexLambda->DrawLatex(0.65, 0.55, "|y| < 0.5");
 
@@ -2053,125 +2290,6 @@ cLambdaAntiLambdaFitComparison->Write();
             F1->cd();
             gDirectory->cd("Comparisons");
             cCompareRun2Lambda->Write();
-         //
-         //
-         /////////////////////////////////////////////////////////////////////////////////
-         //Comparison Lambda+LambdaBar to Francesca
-         //////////////////////////////////////////////////////////////////////////////////
-         //
-         //
-            TFile *fFranLambda = TFile::Open(francescaFileLambda); //Load Francesca's Lambda histogram
-            TFile *fFranAntiLambda = TFile::Open(francescaFileAntiLambda); //Load Francesca's AntiLambda histogram
-
-            if (!fFranLambda || fFranLambda->IsZombie()) {
-                std::cerr << "Error opening Results_Lambda.root\n";
-                return 0;
-            }
-
-            if (!fFranAntiLambda || fFranAntiLambda->IsZombie()) {
-                std::cerr << "Error opening Results_AntiLambda.root\n";
-                return 0;
-            }
-
-            TH1D *hFranLambda = (TH1D*)fFranLambda->Get(francescaHistLambda);
-            TH1D *hFranAntiLambda = (TH1D*)fFranAntiLambda->Get(francescaHistAntiLambda);
-
-            if (!hFranLambda || !hFranAntiLambda) {
-                std::cerr << "Error loading Francesca histograms\n";
-                return 0;
-            }
-
-            TH1D *hFrancescaLambdaPlusAntiLambda = (TH1D*)hFranLambda->Clone("hFrancescaLambdaPlusAntiLambda");
-            hFrancescaLambdaPlusAntiLambda->Add(hFranAntiLambda); //Add both her results together for comparison
-
-         // Prepare new canvas with ratio pad
-            TCanvas *cCompareFranLambda = new TCanvas("cCompareFran_Lambda+AntiLambda", "Comparison Lambda+LambdaBar to Francesca", 800, 800);
-            TPad *pad1_FranLambda = new TPad("pad1_Fran_lambda", "Main pad", 0, 0.3, 1, 1.0);
-            TPad *pad2_FranLambda = new TPad("pad2_Fran_lambda", "Ratio pad", 0, 0.05, 1, 0.3);
-            pad1_FranLambda->Draw();
-            pad2_FranLambda->Draw();
-
-         // -- Draw top pad --
-            pad1_FranLambda->cd();
-            gStyle->SetOptTitle(0);
-            gStyle->SetOptStat(0);
-            pad1_FranLambda->SetLogy(1);
-            pad1_FranLambda->SetTickx(1);
-            pad1_FranLambda->SetTicky(1);
-            pad1_FranLambda->SetBottomMargin(0.01);
-
-            hLambdaPlusAntiLambdaForComparison->Draw("PE");
-            hLambdaPlusAntiLambdaForComparison->GetXaxis()->SetRangeUser(0.0,8.0);
-
-            hFrancescaLambdaPlusAntiLambda->SetLineColor(kTeal+2);
-            hFrancescaLambdaPlusAntiLambda->SetMarkerColor(kTeal+2);
-            hFrancescaLambdaPlusAntiLambda->SetMarkerStyle(22);
-            hFrancescaLambdaPlusAntiLambda->Draw("SAME PE");
-
-         // Legend
-            TLegend* legendcompareFranLambda = new TLegend(0.55, 0.70, 0.88, 0.88);
-            legendcompareFranLambda->SetTextSize(0.03);
-            legendcompareFranLambda->SetBorderSize(0);
-            legendcompareFranLambda->SetFillColor(kWhite);
-            legendcompareFranLambda->AddEntry(hLambdaPlusAntiLambdaForComparison, legendNameLambda + " Corrected p_{T} Spectrum", "lp");
-            TString textCompareFranLambda = "Main Analysis " + energy;
-            legendcompareFranLambda->AddEntry(hFrancescaLambdaPlusAntiLambda, textCompareFranLambda, "pl");
-            legendcompareFranLambda->Draw();
-
-         // Labels
-            TLatex *latexFranLambda = new TLatex();
-            latexFranLambda->SetNDC();
-            latexFranLambda->SetTextSize(0.03);
-            latexFranLambda->DrawLatex(0.65, 0.65, "pp");
-            latexFranLambda->DrawLatex(0.65, 0.60, textCompareFranLambda.Data());
-            latexFranLambda->DrawLatex(0.65, 0.55, "|y| < 0.5");
-
-         // -- Bottom pad: ratio --
-            pad2_FranLambda->cd();
-            gPad->SetTopMargin(0.01);
-            gPad->SetBottomMargin(0.3);
-            gPad->SetGridy();
-
-            TH1D *hRatioFranLambda = (TH1D*)hLambdaPlusAntiLambdaForComparison->Clone("hRatioFranLambda");
-            int nbinsFranLambda = hRatioFranLambda->GetNbinsX();
-            int firstValidLambda = 3;
-            int lastValidLambda = nbinsFranLambda - 9;
-
-            for (int i = 1; i <= nbinsFranLambda; ++i) {
-                double num = hRatioFranLambda->GetBinContent(i);
-                double den = hFrancescaLambdaPlusAntiLambda->GetBinContent(i-2);
-                if (i >= firstValidLambda && i <= lastValidLambda && den != 0) {
-                    hRatioFranLambda->SetBinContent(i, num / den);
-                    double err = hRatioFranLambda->GetBinError(i);
-                    double denErr = hFrancescaLambdaPlusAntiLambda->GetBinError(i-2);
-                    double newErr = num / den * std::sqrt( std::pow(err/num,2) + std::pow(denErr/den,2) );
-                    hRatioFranLambda->SetBinError(i, newErr);
-                } else {
-                    hRatioFranLambda->SetBinContent(i, 0);
-                    hRatioFranLambda->SetBinError(i, 0);
-                }
-            }
-
-            hRatioFranLambda->SetTitle("");
-            hRatioFranLambda->GetYaxis()->SetTitle("My Results / Main Analysis");
-            hRatioFranLambda->GetXaxis()->SetTitle("p_{T} (GeV/c)");
-            hRatioFranLambda->SetMarkerStyle(33);
-            hRatioFranLambda->SetMarkerSize(1);
-            hRatioFranLambda->SetMarkerColor(kCyan+2);
-            hRatioFranLambda->SetLineColor(kCyan+2);
-            hRatioFranLambda->GetYaxis()->SetTitleSize(0.08);
-            hRatioFranLambda->GetYaxis()->SetTitleOffset(0.5);
-            hRatioFranLambda->GetYaxis()->SetLabelSize(0.08);
-            hRatioFranLambda->GetXaxis()->SetLabelSize(0.08);
-            hRatioFranLambda->GetXaxis()->SetTitleSize(0.10);
-            hRatioFranLambda->GetXaxis()->SetTitleOffset(1.0);
-            hRatioFranLambda->GetXaxis()->SetRangeUser(0.0,8.0);
-            hRatioFranLambda->Draw("PE");
-
-            cCompareFranLambda->Update();
-            F1->cd();
-            gDirectory->cd("Comparisons");
-            if (cCompareFranLambda)cCompareFranLambda->Write();
       //
       //
       /////////////////////////////////////////////////////////////////////////////////
@@ -2234,7 +2352,7 @@ cLambdaAntiLambdaFitComparison->Write();
             std::vector<TH1D*> ratioList;
             TH1D* hRatioSum = nullptr;
             //Function that Computes Lambda+AntiLambda / 2K0s
-            ComputeCentralityRatios(F1,"Corrected Pt Spectrum",*nCentBinsKaons,ratioList,hRatioSum);
+            ComputeBaryonToMesonRatio(F1,"Corrected Pt Spectrum",*nCentBinsKaons,ratioList,hRatioSum);
 
             TCanvas* cBaryonMesonRatio = new TCanvas("BaryonMesonRatio","(Lambda+AntiLambda)/2K0s",900,800);
             gStyle->SetOptStat(0);
@@ -2265,8 +2383,7 @@ cLambdaAntiLambdaFitComparison->Write();
                 hBaryonMesonRatio->GetYaxis()->SetTitleSize(0.05);
                 hBaryonMesonRatio->GetYaxis()->SetLabelSize(0.045);
                 hBaryonMesonRatio->GetXaxis()->SetLabelSize(0);
-                hBaryonMesonRatio->GetXaxis()->SetRangeUser(0.5, 3.0);
-                hBaryonMesonRatio->GetYaxis()->SetRangeUser(0.0, 3.0);
+                hBaryonMesonRatio->GetYaxis()->SetRangeUser(0.0, 1.0);
 
                 if (first) {
 
@@ -2276,7 +2393,6 @@ cLambdaAntiLambdaFitComparison->Write();
                 else {
                     hBaryonMesonRatio->Draw("E SAME");
                 }
-
                 legBaryonMesonRatio->AddEntry(hBaryonMesonRatio, Form("%s (%.0f-%.0f%%)",roman[i].Data(),(*nCentBinsKaons)[i], (*nCentBinsKaons)[i+1]),"lep");
             }
 
@@ -2331,7 +2447,6 @@ cLambdaAntiLambdaFitComparison->Write();
                 hComparison->GetYaxis()->SetTitleSize(0.10);
                 hComparison->GetYaxis()->SetLabelSize(0.08);
                 hComparison->GetYaxis()->SetNdivisions(505);
-                hComparison->GetXaxis()->SetRangeUser(0.5, 3.0);
                 hComparison->GetYaxis()->SetRangeUser(0.4, 1.6);
 
                 if (firstComparison) {
@@ -2344,14 +2459,171 @@ cLambdaAntiLambdaFitComparison->Write();
             }
             // Unity Line
 
-            TLine* unity =new TLine(0.5, 1.0, 3.0, 1.0);
+            TLine* unity =new TLine(0.5, 1.0, 6.5, 1.0);
             unity->SetLineStyle(2);
             unity->SetLineWidth(2);
             unity->Draw("SAME");
 
             cBaryonMesonRatio->Update();
             if (cBaryonMesonRatio)  cBaryonMesonRatio->Write();
+
+        //
+        // ============================================================
+        // Compare Baryon-to-Meson Ratio Sum to Run 2
+        // ============================================================
+        //
+
+            TCanvas* cBaryonMesonRun2Comparison = new TCanvas("cBaryonMesonRun2", "Baryon-to-Meson Ratio: Run 3 vs Run 2",900, 800);
+
+            TFile *fileGraphBaryontoMeson = TFile::Open(run2File);  
+            if (!fileGraphBaryontoMeson) { std::cerr << "Error: Cannot open baryon-to-meson graph file.\n"; return 0; }
+
+            TString run2DirBaryonMeson = "Figure 3";
+            TDirectory *dirBaryonMeson = (TDirectory*)fileGraphBaryontoMeson->Get(run2DirBaryonMeson);  
+            if (!dirBaryonMeson) { std::cerr << "Error: Baryon-to-Meson directory not found.\n"; return 0; }
+
+            TString run2GraphBaryonMeson = "Graph1D_y10";
+            TGraph *gExternalBaryonMeson = (TGraph*)dirBaryonMeson->Get(run2GraphBaryonMeson);
+            if (!gExternalBaryonMeson) { std::cerr << "Error: Baryon-to-Meson TGraph not found.\n"; return 0; }
+
+            gStyle->SetOptStat(0);
+
+            TPad* pad1Run2 = new TPad("pad1BaryonMesonRun2","Main pad",0.0, 0.30, 1.0, 1.0);
+            TPad* pad2Run2 = new TPad("pad2BaryonMesonRun2","Ratio pad",0.0, 0.00, 1.0, 0.30);
+
+            pad1Run2->SetBottomMargin(0.02);
+            pad2Run2->SetTopMargin(0.02);
+            pad2Run2->SetBottomMargin(0.30);
+
+            pad1Run2->Draw();
+            pad2Run2->Draw();
+
+
+            // ========================================================
+            // Top pad
+            // ========================================================
+
+            pad1Run2->cd();
+
+            hRatioSum->SetTitle("");
+            hRatioSum->SetLineColor(kGreen+1);
+            hRatioSum->SetMarkerColor(kGreen+1);
+            hRatioSum->SetMarkerStyle(33);
+            hRatioSum->SetMarkerSize(1.2);
+            hRatioSum->SetLineWidth(2);
+
+            hRatioSum->GetYaxis()->SetTitle( "(#Lambda + #bar{#Lambda})/2K^{0}_{S}");
+            hRatioSum->GetYaxis()->SetTitleSize(0.05);
+            hRatioSum->GetYaxis()->SetLabelSize(0.045);
+            hRatioSum->GetXaxis()->SetLabelSize(0);
+            hRatioSum->GetYaxis()->SetRangeUser(0.0, 0.8);
+            hRatioSum->Draw("E");
+
+
+            // Run 2
+            gExternalBaryonMeson->SetLineColor(kBlue+1);
+            gExternalBaryonMeson->SetMarkerColor(kBlue+1);
+            gExternalBaryonMeson->SetMarkerStyle(23);
+            gExternalBaryonMeson->SetMarkerSize(1.2);
+
+            gExternalBaryonMeson->Draw("P SAME");
+
+
+            // ========================================================
+            // Legend
+            // ========================================================
+
+            TLegend* legBaryonMesonRun2 = new TLegend(0.55, 0.68, 0.88, 0.86);
+
+            legBaryonMesonRun2->SetBorderSize(0);
+            legBaryonMesonRun2->AddEntry(hRatioSum,"(Baryon-to-Meson ratio, #sqrt{#it{s}} = 5.36 TeV)","lep");
+            legBaryonMesonRun2->AddEntry(gExternalBaryonMeson,"ALICE 2025 (#sqrt{#it{s}} = 5.02 TeV)","lp");
+            legBaryonMesonRun2->Draw();
+
+            // ========================================================
+            // Bottom pad: Run 3 / Run 2
+            // ========================================================
+
+            pad2Run2->cd();
+
+            gPad->SetGridy();
+
+            int nRun2 = gExternalBaryonMeson->GetN();
+
+            double* xRun2 = gExternalBaryonMeson->GetX();
+            double* yRun2 = gExternalBaryonMeson->GetY();
+
+            TGraphErrors* gRatioBaryonMesonRun2Comparison = new TGraphErrors();
+
+            for (int i = 0; i < nRun2; ++i) {
+
+                double x = xRun2[i];
+                double y = yRun2[i];
+
+                int bin = hRatioSum->FindBin(x);
+
+                double yRun3 = hRatioSum->GetBinContent(bin);
+
+                if (y <= 0 || yRun3 <= 0)
+                    continue;
+
+                double sigmaRun2 = 0.0;
+
+                TGraphErrors* gRun2Errors = dynamic_cast<TGraphErrors*>(gExternalBaryonMeson);
+
+                if (gRun2Errors)
+                    sigmaRun2 = gRun2Errors->GetErrorY(i);
+
+                double sigmaRun3 = hRatioSum->GetBinError(bin);
+
+                double ratio = yRun3 / y;
+
+                double ratioErr = ratio * std::sqrt((sigmaRun3 / yRun3) * (sigmaRun3 / yRun3) +(sigmaRun2 / y) * (sigmaRun2 / y));
+
+                int point = gRatioBaryonMesonRun2Comparison->GetN();
+
+                gRatioBaryonMesonRun2Comparison->SetPoint(point, x, ratio);
+                gRatioBaryonMesonRun2Comparison->SetPointError(point, 0, ratioErr);
+            }
+
+            gRatioBaryonMesonRun2Comparison->SetTitle("");
+
+            gRatioBaryonMesonRun2Comparison->SetMarkerStyle(33);
+            gRatioBaryonMesonRun2Comparison->SetMarkerSize(1.0);
+            gRatioBaryonMesonRun2Comparison->SetMarkerColor(kCyan+1);
+            gRatioBaryonMesonRun2Comparison->SetLineColor(kCyan+2);
+
+            gRatioBaryonMesonRun2Comparison->GetYaxis()->SetTitle("Run 3 / Run 2");
+            gRatioBaryonMesonRun2Comparison->GetXaxis()->SetTitle("p_{T} (GeV/c)");
+
+            gRatioBaryonMesonRun2Comparison->GetYaxis()->SetTitleSize(0.10);
+            gRatioBaryonMesonRun2Comparison->GetYaxis()->SetTitleOffset(0.5);
+            gRatioBaryonMesonRun2Comparison->GetYaxis()->SetLabelSize(0.08);
+            gRatioBaryonMesonRun2Comparison->GetXaxis()->SetLabelSize(0.08);
+            gRatioBaryonMesonRun2Comparison->GetXaxis()->SetTitleSize(0.10);
+            gRatioBaryonMesonRun2Comparison->GetXaxis()->SetTitleOffset(1.0);
+            gRatioBaryonMesonRun2Comparison->GetYaxis()->SetRangeUser(0.5, 1.5);
+            gRatioBaryonMesonRun2Comparison->Draw("APE");
+
+            // Unity line
+
+            TLine* unityRun2 = new TLine(0.5, 1.0, 6.5, 1.0);
+
+            unityRun2->SetLineStyle(2);
+            unityRun2->SetLineWidth(2);
+            unityRun2->Draw("SAME");
+
+            cBaryonMesonRun2Comparison->Update();
+
+            F1->cd();
+            gDirectory->cd("Comparisons");
+
+            cBaryonMesonRun2Comparison->Write();
         }
+
+
+
+
 
     }//end of particle Loop. WATCH OUT FOR THE BRACKETS!
     F1->Close();
@@ -2408,199 +2680,7 @@ void CalculateSignalSimple(TString& histname,std::vector<TString>& ptbins, std::
 }
 */
 
-
-    /*
-//
-//Drawing Peak and Width vs Pt
-//
-//
-TH1* hPeak = new TH1D("K0shPeakvsPtSpectrum", "K0shPeakvsPtSpectrum", ptbinedges.size()-1, ptbinedges.data());
-for(int i=0;i<nhistos;i++){
-    hPeak->SetBinContent(i+1,peak_measured[i]);
-}
-
-TH1* hWidth = new TH1D("K0shWidthvsPtSpectrum", "K0shWidthvsPtSpectrum", ptbinedges.size()-1, ptbinedges.data());
-for(int i=0;i<nhistos;i++){
-    hWidth->SetBinContent(i+1,width_measured[i]);
-}
-
-   // --- Canvas and pads ---
-TCanvas *cPeakWidth = new TCanvas("cPeakWidth", "Peak and Width vs pT", 800, 800);
-TPad *padpeak = new TPad("padpeak", "Peak pad", 0, 0.35, 1, 1.0);  // top pad
-TPad *padwidth = new TPad("padwidth", "Width pad", 0, 0.05, 1, 0.35); // bottom pad
-
-padpeak->Draw();
-padwidth->Draw();
-
-   // --- Top pad: Peak ---
-padpeak->cd();
-gStyle->SetOptTitle(0);
-gStyle->SetOptStat(0);
-padpeak->SetBottomMargin(0.01);
-
-hPeak->SetMarkerStyle(kFullCircle);
-hPeak->SetMarkerSize(1);
-hPeak->SetMarkerColor(kBlue+2);
-hPeak->SetLineColor(kBlue+2);
-hPeak->GetYaxis()->SetTitle("Peak value");
-hPeak->GetYaxis()->SetRangeUser(0.497, 0.499);
-hPeak->Draw("P");
-
-   //PDG Value Line
-double pdgValue = 0.497611;
-
-   // Get x-axis range to know where to draw the line
-double xmin = hPeak->GetXaxis()->GetXmin();
-double xmax = hPeak->GetXaxis()->GetXmax();
-
-   // Create a horizontal line at pdgValue
-TLine *pdgpeakline = new TLine(xmin, pdgValue, xmax, pdgValue);
-pdgpeakline->SetLineColor(kRed);
-pdgpeakline->SetLineStyle(2); // dashed line
-pdgpeakline->SetLineWidth(2);
-pdgpeakline->Draw("same");
-
-   // Label/legend
-TLegend *legPeak = new TLegend(0.55, 0.75, 0.88, 0.88);
-legPeak->SetTextSize(0.03);
-legPeak->SetBorderSize(0);
-legPeak->AddEntry(hPeak, "Peak vs p_{T}", "lp");
-legPeak->AddEntry(pdgpeakline, "PDG Value os K^{0}_{s} Mass", "l");
-legPeak->Draw();
-
-//   TLatex latexpeakwidth;
-latexpeakwidth.SetNDC();
-latexpeakwidth.SetTextSize(0.03);
-latexpeakwidth.DrawLatex(0.6, 0.68, "pp collisions");
-latexpeakwidth.DrawLatex(0.6, 0.62, "#sqrt{#it{s}} = " + energy);
-latexpeakwidth.DrawLatex(0.6, 0.56, "|y| < 0.5");  //
-
-   // --- Bottom pad: Width ---
-padwidth->cd();
-padwidth->SetTopMargin(0.01);
-padwidth->SetBottomMargin(0.3);
-padwidth->SetGridy();
-
-hWidth->SetMarkerStyle(22);
-hWidth->SetMarkerSize(1);
-hWidth->SetMarkerColor(kRed+1);
-hWidth->SetLineColor(kRed+1);
-hWidth->SetTitle("");
-
-hWidth->GetYaxis()->SetTitle("Width value");
-hWidth->GetYaxis()->SetTitleSize(0.08);
-hWidth->GetYaxis()->SetTitleOffset(0.6);
-hWidth->GetYaxis()->SetLabelSize(0.07);
-
-hWidth->GetXaxis()->SetTitle("p_{T} (GeV/c)");
-hWidth->GetXaxis()->SetTitleSize(0.10);
-hWidth->GetXaxis()->SetTitleOffset(1.0);
-hWidth->GetXaxis()->SetLabelSize(0.08);
-
-hWidth->Draw("P");
-cPeakWidth->Update();
-   */
-
-   //
-/////////////////////////////////////////////////////////////////////////////////
- //Alpha Test
-//////////////////////////////////////////////////////////////////////////////////
-//
 /*
-TCanvas *cAlphaTest = new TCanvas("cAlphaTest", "Alpha test", 800, 800);
-TPad *padAlpha1 = new TPad("padAlpha1", "Main pad", 0, 0.3, 1, 1.0);
-TPad *padAlpha2 = new TPad("padAlpha2", "Ratio pad", 0, 0.05, 1, 0.3);
-
-padAlpha1->Draw();
-padAlpha2->Draw();
-
-    // -- Top pad: draw corrected and generated spectra --
-padAlpha1->cd();
-gStyle->SetOptTitle(0);
-gStyle->SetOptStat(0);
-padAlpha1->SetLogy(1);
-padAlpha1->SetBottomMargin(0.01);
-
-    // Clone the original histogram to keep original unchanged and multiply by nCollisions so they are comparible
-TH1D *hGeneratedK0shAlpha = (TH1D*)hGeneratedK0sh->Clone("hGeneratedK0shAlpha");
-    //hGeneratedK0shAlpha->Scale(1.0/nCollisionsGen);
-
-TH1D *hCorrectedK0shAlpha = (TH1D*)hCorrectedK0sh->Clone("hCorrectedK0shAlpha");
-hCorrectedK0shAlpha->Scale(nCollisionsGen);
-hCorrectedK0shAlpha->SetMarkerStyle(kFullCircle);
-hCorrectedK0shAlpha->SetMarkerColor(kBlue+1);
-hCorrectedK0shAlpha->SetLineColor(kBlue+1);
-hCorrectedK0shAlpha->SetMarkerSize(1);
-hCorrectedK0shAlpha->GetYaxis()->SetTitle("1/N_{INEL>0} d^{2}N/(dp_{T}dy) [(GeV/c)^{-1}]");
-hCorrectedK0shAlpha->Draw("PE");
-
-hGeneratedK0shAlpha->SetMarkerStyle(22);
-hGeneratedK0shAlpha->SetMarkerColor(kRed+1);
-hGeneratedK0shAlpha->SetLineColor(kRed+1);
-hGeneratedK0shAlpha->SetMarkerSize(1);
-NormalizeByBinWidth(hGeneratedK0shAlpha);
-hGeneratedK0shAlpha->Draw("PE SAME");
-
-TLegend *legAlpha = new TLegend(0.55, 0.70, 0.88, 0.88);
-legAlpha->SetTextSize(0.03);
-legAlpha->SetBorderSize(0);
-legAlpha->SetFillColor(kWhite);
-legAlpha->AddEntry(hCorrectedK0shAlpha, "Corrected Spectrum", "lp");
-legAlpha->AddEntry(hGeneratedK0shAlpha, "Generated Spectrum", "lp");
-legAlpha->Draw();
-
-TLatex latexAlpha;
-latexAlpha.SetNDC();
-latexAlpha.SetTextSize(0.03);
-latexAlpha.DrawLatex(0.6, 0.65, "MC Closure Test (Alpha)");
-latexAlpha.DrawLatex(0.6, 0.60, "pp");
-latexAlpha.DrawLatex(0.6, 0.55, "#sqrt{#it{s}} = " +energy);
-latexAlpha.DrawLatex(0.6, 0.50, "|y| < 0.5");
-
-    // -- Bottom pad: ratio Corrected / Generated --
-padAlpha2->cd();
-padAlpha2->SetGridy();
-padAlpha2->SetTopMargin(0.01);
-padAlpha2->SetBottomMargin(0.3);
-
-   // Checking errors
-hGeneratedK0sh->Sumw2();
-hCorrectedK0sh->Sumw2();
-
-    // Create ratio histogram
-TH1D *hRatioAlpha = (TH1D*)hCorrectedK0shAlpha->Clone("hRatioAlpha");
-hRatioAlpha->SetTitle("");
-hRatioAlpha->Divide(hCorrectedK0shAlpha, hGeneratedK0shAlpha, 1.0, 1.0);
-
-hRatioAlpha->GetYaxis()->SetTitle("Corrected / Generated");
-hRatioAlpha->GetYaxis()->SetTitleSize(0.08);
-hRatioAlpha->GetYaxis()->SetTitleOffset(0.5);
-hRatioAlpha->GetYaxis()->SetLabelSize(0.08);
-
-hRatioAlpha->GetXaxis()->SetTitle("p_{T} (GeV/c)");
-hRatioAlpha->GetXaxis()->SetTitleSize(0.10);
-hRatioAlpha->GetXaxis()->SetTitleOffset(1.0);
-hRatioAlpha->GetXaxis()->SetLabelSize(0.08);
-
-hRatioAlpha->SetMarkerStyle(33);
-hRatioAlpha->SetMarkerSize(1);
-hRatioAlpha->SetMarkerColor(kCyan+2);
-hRatioAlpha->SetLineColor(kCyan+2);
-for (int i = 1; i <= hRatioAlpha->GetNbinsX(); ++i) {
-    hRatioAlpha->SetBinError(i, 0);
-}
-hRatioAlpha->Draw("PE");
-
-    // Reference line at 1
-TLine *lineAlpha = new TLine(hRatioAlpha->GetXaxis()->GetXmin(), 1.0,
-hRatioAlpha->GetXaxis()->GetXmax(), 1.0);
-lineAlpha->SetLineStyle(2);
-lineAlpha->Draw("SAME");
-
-cAlphaTest->Update();
-//
-//End of Alpha Test
-//
 /////////////////////////////////////////////////////////////////////////////////
 //Beta Test
 //////////////////////////////////////////////////////////////////////////////////
@@ -2654,7 +2734,7 @@ latexBeta.SetNDC();
 latexBeta.SetTextSize(0.03);
 latexBeta.DrawLatex(0.6, 0.65, "MC Closure Test (Beta)");
 latexBeta.DrawLatex(0.6, 0.60, "pp");
-latexBeta.DrawLatex(0.6, 0.55, "#sqrt{#it{s}} = "+energy);
+latexBeta.DrawLatex(0.6, 0.55, "#sqrt{#it{s}} = "+AO2DFiles.energy);
 latexBeta.DrawLatex(0.6, 0.50, "|y| < 0.5");
 
     // -- Bottom pad: ratio Corrected / Generated --
@@ -2782,3 +2862,234 @@ if (!xiHisto) {
     return;
 }
       */
+
+
+            //
+      //
+      /////////////////////////////////////////////////////////////////////////////////
+      //Comparison K0shs to Francesca
+      //////////////////////////////////////////////////////////////////////////////////
+      //
+      /*
+            TFile *ResultsFrancescaK0sh = TFile::Open(francescaFile);  
+            if (!ResultsFrancescaK0sh || ResultsFrancescaK0sh->IsZombie()) {
+                std::cerr << "Error: Cannot open Francesca K0sh file: " << francescaFile << "\n";
+                return 0;
+            }
+
+            TH1D *hFrancescaK0sh = (TH1D*)ResultsFrancescaK0sh->Get(francescaHist);
+            if (!hFrancescaK0sh) {
+                std::cerr << "Error: Francesca Histogram '" << francescaHist << "' not found.\n";
+                return 0;
+            }
+
+      // Prepare new canvas with ratio pad
+            TCanvas *cCompareFranK0sh = new TCanvas("cCompareFran_K0sh", "Comparison K0shs to Francesca", 800, 800);
+            TPad *pad1_FranK0sh = new TPad("pad1_Fran_K0sh", "Main pad", 0, 0.3, 1, 1.0);
+            TPad *pad2_FranK0sh = new TPad("pad2_Fran_K0sh", "Ratio pad", 0, 0.05, 1, 0.3);
+            pad1_FranK0sh->Draw();
+            pad2_FranK0sh->Draw();
+
+      // -- Draw top pad --
+            pad1_FranK0sh->cd();
+            gStyle->SetOptTitle(0);
+            gStyle->SetOptStat(0);
+            pad1_FranK0sh->SetLogy(1);
+            pad1_FranK0sh->SetTickx(1);
+            pad1_FranK0sh->SetTicky(1);
+            pad1_FranK0sh->SetBottomMargin(0.01);
+
+            hK0shCorrectedCompare->Draw("PE");
+            hK0shCorrectedCompare->GetXaxis()->SetRangeUser(0.0,8.0);
+
+            hFrancescaK0sh->SetLineColor(kTeal+2);
+            hFrancescaK0sh->SetMarkerColor(kTeal+2);
+            hFrancescaK0sh->SetMarkerStyle(22);
+            hFrancescaK0sh->Draw("SAME PE");
+
+      // Legend
+            TLegend* legendcompareFranK0sh = new TLegend(0.55, 0.70, 0.88, 0.88);
+            legendcompareFranK0sh->SetTextSize(0.03);
+            legendcompareFranK0sh->SetBorderSize(0);
+            legendcompareFranK0sh->SetFillColor(kWhite);
+            legendcompareFranK0sh->AddEntry(hK0shCorrectedCompare, legendNameK0sh + " Corrected p_{T} Spectrum", "lp");
+            TString textCompareFranK0sh = "Main Analysis " + AO2DFiles.energy;
+            legendcompareFranK0sh->AddEntry(hFrancescaK0sh, textCompareFranK0sh, "pl");
+            legendcompareFranK0sh->Draw();
+
+      // Labels
+            TLatex *latexFranK0sh = new TLatex();
+            latexFranK0sh->SetNDC();
+            latexFranK0sh->SetTextSize(0.03);
+            latexFranK0sh->DrawLatex(0.65, 0.65, "pp");
+            latexFranK0sh->DrawLatex(0.65, 0.60, "#sqrt{#it{s}} = " + AO2DFiles.energy);
+            latexFranK0sh->DrawLatex(0.65, 0.55, "|y| < 0.5");
+
+      // -- Bottom pad: ratio --
+            pad2_FranK0sh->cd();
+            gPad->SetTopMargin(0.01);
+            gPad->SetBottomMargin(0.3);
+            gPad->SetGridy();
+
+            TH1D *hRatioFranK0sh = (TH1D*)hK0shCorrectedCompare->Clone("hRatioFranK0sh");
+            int nbinsFranK0sh = hRatioFranK0sh->GetNbinsX();
+            int firstValidK0sh = 3;
+            int lastValidK0sh = nbinsFranK0sh - 9;
+
+            for (int i = 1; i <= nbinsFranK0sh; ++i) {
+                double num = hRatioFranK0sh->GetBinContent(i);
+                double den = hFrancescaK0sh->GetBinContent(i-2);
+                if (i >= firstValidK0sh && i <= lastValidK0sh && den != 0) {
+                    hRatioFranK0sh->SetBinContent(i, num / den);
+                    double err = hRatioFranK0sh->GetBinError(i);
+                    double denErr = hFrancescaK0sh->GetBinError(i-2);
+                    double newErr = num / den * std::sqrt( std::pow(err/num,2) + std::pow(denErr/den,2) );
+                    hRatioFranK0sh->SetBinError(i, newErr);
+                } else {
+                    hRatioFranK0sh->SetBinContent(i, 0);
+                    hRatioFranK0sh->SetBinError(i, 0);
+                }
+            }
+
+            hRatioFranK0sh->SetTitle("");
+            hRatioFranK0sh->GetYaxis()->SetTitle("My Results / Main Analysis");
+            hRatioFranK0sh->GetXaxis()->SetTitle("p_{T} (GeV/c)");
+            hRatioFranK0sh->SetMarkerStyle(33);
+            hRatioFranK0sh->SetMarkerSize(1);
+            hRatioFranK0sh->SetMarkerColor(kCyan+2);
+            hRatioFranK0sh->SetLineColor(kCyan+2);
+            hRatioFranK0sh->GetYaxis()->SetTitleSize(0.08);
+            hRatioFranK0sh->GetYaxis()->SetTitleOffset(0.5);
+            hRatioFranK0sh->GetYaxis()->SetLabelSize(0.08);
+            hRatioFranK0sh->GetXaxis()->SetLabelSize(0.08);
+            hRatioFranK0sh->GetXaxis()->SetTitleSize(0.10);
+            hRatioFranK0sh->GetXaxis()->SetTitleOffset(1.0);
+            hRatioFranK0sh->GetXaxis()->SetRangeUser(0.0,8.0);
+            hRatioFranK0sh->Draw("PE");
+
+            F1->cd();
+            gDirectory->cd("Comparisons");
+            cCompareFranK0sh->Update();
+            cCompareFranK0sh->Write();
+        */
+
+                 //
+         //
+         /////////////////////////////////////////////////////////////////////////////////
+         //Comparison Lambda+LambdaBar to Francesca
+         //////////////////////////////////////////////////////////////////////////////////
+         //
+         /*
+            TFile *fFranLambda = TFile::Open(francescaFile); //Load Francesca's Lambda histogram
+            TFile *fFranAntiLambda = TFile::Open(francescaFile); //Load Francesca's AntiLambda histogram
+
+            if (!fFranLambda || fFranLambda->IsZombie()) {
+                std::cerr << "Error opening Results_Lambda.root\n";
+                return 0;
+            }
+
+            if (!fFranAntiLambda || fFranAntiLambda->IsZombie()) {
+                std::cerr << "Error opening Results_AntiLambda.root\n";
+                return 0;
+            }
+
+            TH1D *hFranLambda = (TH1D*)fFranLambda->Get(francescaHist);
+            TH1D *hFranAntiLambda = (TH1D*)fFranAntiLambda->Get(francescaHist);
+
+            if (!hFranLambda || !hFranAntiLambda) {
+                std::cerr << "Error loading Francesca histograms\n";
+                return 0;
+            }
+
+            TH1D *hFrancescaLambdaPlusAntiLambda = (TH1D*)hFranLambda->Clone("hFrancescaLambdaPlusAntiLambda");
+            hFrancescaLambdaPlusAntiLambda->Add(hFranAntiLambda); //Add both her results together for comparison
+
+         // Prepare new canvas with ratio pad
+            TCanvas *cCompareFranLambda = new TCanvas("cCompareFran_Lambda+AntiLambda", "Comparison Lambda+LambdaBar to Francesca", 800, 800);
+            TPad *pad1_FranLambda = new TPad("pad1_Fran_lambda", "Main pad", 0, 0.3, 1, 1.0);
+            TPad *pad2_FranLambda = new TPad("pad2_Fran_lambda", "Ratio pad", 0, 0.05, 1, 0.3);
+            pad1_FranLambda->Draw();
+            pad2_FranLambda->Draw();
+
+         // -- Draw top pad --
+            pad1_FranLambda->cd();
+            gStyle->SetOptTitle(0);
+            gStyle->SetOptStat(0);
+            pad1_FranLambda->SetLogy(1);
+            pad1_FranLambda->SetTickx(1);
+            pad1_FranLambda->SetTicky(1);
+            pad1_FranLambda->SetBottomMargin(0.01);
+
+            hLambdaPlusAntiLambdaForComparison->Draw("PE");
+            hLambdaPlusAntiLambdaForComparison->GetXaxis()->SetRangeUser(0.0,8.0);
+
+            hFrancescaLambdaPlusAntiLambda->SetLineColor(kTeal+2);
+            hFrancescaLambdaPlusAntiLambda->SetMarkerColor(kTeal+2);
+            hFrancescaLambdaPlusAntiLambda->SetMarkerStyle(22);
+            hFrancescaLambdaPlusAntiLambda->Draw("SAME PE");
+
+         // Legend
+            TLegend* legendcompareFranLambda = new TLegend(0.55, 0.70, 0.88, 0.88);
+            legendcompareFranLambda->SetTextSize(0.03);
+            legendcompareFranLambda->SetBorderSize(0);
+            legendcompareFranLambda->SetFillColor(kWhite);
+            legendcompareFranLambda->AddEntry(hLambdaPlusAntiLambdaForComparison, legendNameLambda + " Corrected p_{T} Spectrum", "lp");
+            TString textCompareFranLambda = "Main Analysis " + AO2DFiles.energy;
+            legendcompareFranLambda->AddEntry(hFrancescaLambdaPlusAntiLambda, textCompareFranLambda, "pl");
+            legendcompareFranLambda->Draw();
+
+         // Labels
+            TLatex *latexFranLambda = new TLatex();
+            latexFranLambda->SetNDC();
+            latexFranLambda->SetTextSize(0.03);
+            latexFranLambda->DrawLatex(0.65, 0.65, "pp");
+            latexFranLambda->DrawLatex(0.65, 0.60, textCompareFranLambda.Data());
+            latexFranLambda->DrawLatex(0.65, 0.55, "|y| < 0.5");
+
+         // -- Bottom pad: ratio --
+            pad2_FranLambda->cd();
+            gPad->SetTopMargin(0.01);
+            gPad->SetBottomMargin(0.3);
+            gPad->SetGridy();
+
+            TH1D *hRatioFranLambda = (TH1D*)hLambdaPlusAntiLambdaForComparison->Clone("hRatioFranLambda");
+            int nbinsFranLambda = hRatioFranLambda->GetNbinsX();
+            int firstValidLambda = 3;
+            int lastValidLambda = nbinsFranLambda - 9;
+
+            for (int i = 1; i <= nbinsFranLambda; ++i) {
+                double num = hRatioFranLambda->GetBinContent(i);
+                double den = hFrancescaLambdaPlusAntiLambda->GetBinContent(i-2);
+                if (i >= firstValidLambda && i <= lastValidLambda && den != 0) {
+                    hRatioFranLambda->SetBinContent(i, num / den);
+                    double err = hRatioFranLambda->GetBinError(i);
+                    double denErr = hFrancescaLambdaPlusAntiLambda->GetBinError(i-2);
+                    double newErr = num / den * std::sqrt( std::pow(err/num,2) + std::pow(denErr/den,2) );
+                    hRatioFranLambda->SetBinError(i, newErr);
+                } else {
+                    hRatioFranLambda->SetBinContent(i, 0);
+                    hRatioFranLambda->SetBinError(i, 0);
+                }
+            }
+
+            hRatioFranLambda->SetTitle("");
+            hRatioFranLambda->GetYaxis()->SetTitle("My Results / Main Analysis");
+            hRatioFranLambda->GetXaxis()->SetTitle("p_{T} (GeV/c)");
+            hRatioFranLambda->SetMarkerStyle(33);
+            hRatioFranLambda->SetMarkerSize(1);
+            hRatioFranLambda->SetMarkerColor(kCyan+2);
+            hRatioFranLambda->SetLineColor(kCyan+2);
+            hRatioFranLambda->GetYaxis()->SetTitleSize(0.08);
+            hRatioFranLambda->GetYaxis()->SetTitleOffset(0.5);
+            hRatioFranLambda->GetYaxis()->SetLabelSize(0.08);
+            hRatioFranLambda->GetXaxis()->SetLabelSize(0.08);
+            hRatioFranLambda->GetXaxis()->SetTitleSize(0.10);
+            hRatioFranLambda->GetXaxis()->SetTitleOffset(1.0);
+            hRatioFranLambda->GetXaxis()->SetRangeUser(0.0,8.0);
+            hRatioFranLambda->Draw("PE");
+
+            cCompareFranLambda->Update();
+            F1->cd();
+            gDirectory->cd("Comparisons");
+            if (cCompareFranLambda)cCompareFranLambda->Write();
+            */
