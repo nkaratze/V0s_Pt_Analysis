@@ -131,10 +131,7 @@ void V0sNchEnergySpectrum(){
 
         gNchMatrixMean->SetPoint(ic-1, meanGen, meanReco);
 
-        std::cout << "Cent bin " << ic
-                << "  Gen=" << meanGen
-                << "  Reco=" << meanReco
-                << std::endl;
+        std::cout << "Cent bin " << ic << "  Gen=" << meanGen  << "  Reco=" << meanReco << std::endl;
 
         delete hGen;
         delete hReco;
@@ -191,16 +188,6 @@ void V0sNchEnergySpectrum(){
 
     hRecoGenRatio->SetStats(0);
     hRecoGenRatio->Draw("PE");
-
-
-
-
-
-
-
-
-
-
 
     TCanvas* cEff = new TCanvas("cEff", "Nch Efficiency", 800, 600);
 
@@ -483,7 +470,10 @@ void V0sNchEnergySpectrum(){
 
             std::cout << "Processing centrality: " << key << std::endl;
 
-            double yield_measured = hPtSpectra->Integral("width");
+            //double yield_measured = hPtSpectra->Integral("width");
+            double yield_measured = 0.0;
+            double yield_measured_error = 0.0;
+            yield_measured = hPtSpectra->IntegralAndError(1,hPtSpectra->GetNbinsX(),yield_measured_error,"width");
 
             double pT_min = 0.0;
             double pT_max = 6.5;
@@ -497,20 +487,33 @@ void V0sNchEnergySpectrum(){
             }
             double yield_extrap = yield_low + yield_high;
             double yield_total  = yield_measured + yield_extrap;
+            double yield_total_error = yield_measured_error;
             double frac_extrap = (yield_total > 0) ? yield_extrap / yield_total : 0.0;
 
 
             // ---------- <pT> numerator from measured region ----------
             double ptMeasured = 0.0;
+            double ptMeasuredError2 = 0.0;
+            double covPtYield = 0.0;
 
             for (int ib = 1; ib <= hPtSpectra->GetNbinsX(); ++ib) {
 
                 double pt    = hPtSpectra->GetBinCenter(ib);
                 double value = hPtSpectra->GetBinContent(ib);
+                double error = hPtSpectra->GetBinError(ib);
                 double width = hPtSpectra->GetBinWidth(ib);
 
+                // Measured pT numerator
                 ptMeasured += pt * value * width;
+
+                // Variance of pT numerator
+                double dN = pt * error * width;
+                ptMeasuredError2 += dN * dN;
+
+                // Covariance between pT numerator and yield
+                covPtYield += pt * width * width * error * error;
             }
+            double ptMeasuredError = std::sqrt(ptMeasuredError2);
 
             double ptLow  = 0.0;
             double ptHigh = 0.0;
@@ -520,8 +523,16 @@ void V0sNchEnergySpectrum(){
             ptHigh = fPtWeight.Integral(pT_max, 30.0);
             
             double ptNumerator = ptMeasured + ptLow + ptHigh;
-            double ptMean = ptNumerator / yield_total;
+            double ptNumeratorError = ptMeasuredError;
+            double ptMean = 0.0;
+            double ptMeanError = 0.0;
 
+            if (yield_total > 0.0) {
+                ptMean = ptNumerator / yield_total;
+
+                double varMeanPt = ptMeasuredError2 / (yield_measured * yield_measured) + (ptMeasured * ptMeasured * yield_measured_error * yield_measured_error) / std::pow(yield_measured, 4) - 2.0 * ptMeasured * covPtYield / std::pow(yield_measured, 3);
+                ptMeanError = std::sqrt(std::max(0.0, varMeanPt));
+            }
             auto pos = std::find(centKeysK0sh.begin(), centKeysK0sh.end(), key);
 
             if (pos == centKeysK0sh.end())
@@ -530,8 +541,10 @@ void V0sNchEnergySpectrum(){
             int iCent = std::distance(centKeysK0sh.begin(), pos) + 1;
 
             hK0shYieldCent->SetBinContent(iCent, yield_total);
+            hK0shYieldCent->SetBinError(iCent, yield_total_error);
             hK0shExtrapFrac->SetBinContent(iCent, frac_extrap);
             hK0shMeanPtCent->SetBinContent(iCent, ptMean);
+            hK0shMeanPtCent->SetBinError(iCent, ptMeanError);
 
             if(yield_total > 0) {
                 std::cout << "Centrality Bin " << iCent << "  Measured Yield = " << yield_measured << "  Extrapolated Yield = " << yield_extrap << "  Total Yield = " << yield_total << std::endl;
@@ -548,13 +561,13 @@ void V0sNchEnergySpectrum(){
         hK0shYieldCent->SetMarkerSize(1.2);
         hK0shYieldCent->SetMarkerColor(kBlue+1);
         hK0shYieldCent->SetLineColor(kBlue+1);
-        hK0shYieldCent->Draw("P");
+        hK0shYieldCent->Draw("PE");
         cK0shYield->cd(2);
         hK0shExtrapFrac->SetMarkerStyle(kFullTriangleUp);
         hK0shExtrapFrac->SetMarkerSize(1.2);
         hK0shExtrapFrac->SetMarkerColor(kBlue+1);
         hK0shExtrapFrac->SetLineColor(kBlue+1);
-        hK0shExtrapFrac->Draw("P");
+        hK0shExtrapFrac->Draw("PE");
         cK0shYield->Write();
 
         TCanvas* cK0shMeanPt = new TCanvas("cK0shMeanPt","K^{0}_{S} Average Mean Pt vs Centrality",800, 600);
@@ -563,25 +576,28 @@ void V0sNchEnergySpectrum(){
         hK0shMeanPtCent->SetMarkerSize(1.2);
         hK0shMeanPtCent->SetMarkerColor(kBlue+1);
         hK0shMeanPtCent->SetLineColor(kBlue+1);
-        hK0shMeanPtCent->Draw("P");
+        hK0shMeanPtCent->Draw("PE");
         cK0shMeanPt->Write();
 
         if(pNchK0sh->GetNbinsX() == hK0shYieldCent->GetNbinsX()){
             int nBins = hK0shYieldCent->GetNbinsX();
-            std::vector<double> x, y;
+            std::vector<double> x, y, ex, ey;
 
             for (int i = 1; i <= nBins; i++) {
 
                 double xval = hNchK0shBins->GetBinContent(i);
                 double yval = hK0shYieldCent->GetBinContent(i);
 
+                double xerr = hNchK0shBins->GetBinError(i);
                 double yerr = hK0shYieldCent->GetBinError(i);
 
                 x.push_back(xval);
                 y.push_back(yval);
+                ex.push_back(xerr);
+                ey.push_back(yerr);
             }
 
-            gK0shNch =new TGraph(x.size(),x.data(), y.data());
+            gK0shNch = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
             gK0shNch->SetName("gK0shNch");
             gK0shNch->SetTitle("K^{0}_{S} Yield vs N_{ch};N_{ch};Yield");
             gK0shNch->SetMarkerStyle(kFullCircle);
@@ -667,7 +683,9 @@ void V0sNchEnergySpectrum(){
 
             std::cout << "Processing centrality: " << key << std::endl;
 
-            double yield_measured = hPtSpectra->Integral("width");
+            double yield_measured_error = 0.0;
+            double yield_measured = hPtSpectra->IntegralAndError(1, hPtSpectra->GetNbinsX(), yield_measured_error, "width");
+
 
             double pT_min = 0.5;
             double pT_max = 6.5;
@@ -676,6 +694,7 @@ void V0sNchEnergySpectrum(){
             double yield_high = 0.0;
 
             double ptMeasured = 0.0;
+            double ptMeasuredError2 = 0.0;
             double ptLow  = 0.0;
             double ptHigh = 0.0;
 
@@ -683,11 +702,16 @@ void V0sNchEnergySpectrum(){
 
                 double pt = hPtSpectra->GetBinCenter(ib);
                 double value = hPtSpectra->GetBinContent(ib);
+                double error = hPtSpectra->GetBinError(ib);
                 double width = hPtSpectra->GetBinWidth(ib);
 
                 ptMeasured += pt * value * width;
+
+                double contributionError = pt * error * width;
+                ptMeasuredError2 += contributionError * contributionError;
             }
 
+            double ptMeasuredError = std::sqrt(ptMeasuredError2);
 
             if (fLevyTsallis) {
 
@@ -704,11 +728,18 @@ void V0sNchEnergySpectrum(){
 
             double yield_extrap = yield_low + yield_high;
             double yield_total  = yield_measured + yield_extrap;
+            double yield_total_error = yield_measured_error;
             double frac_extrap = (yield_total > 0) ? yield_extrap / yield_total : 0.0;
 
             double ptNumerator = ptMeasured + ptLow + ptHigh;
-            cout<< "ptMeasured = " << ptMeasured << "  ptLow = " << ptLow << "  ptHigh = " << ptHigh << std::endl;
+            double ptNumeratorError = ptMeasuredError;
+            std::cout<< "ptMeasured = " << ptMeasured << "  ptLow = " << ptLow << "  ptHigh = " << ptHigh << std::endl;
             double meanPt = ptNumerator / yield_total;
+
+            double ptMeanError = 0.0;
+            if (yield_total > 0.0) {
+                ptMeanError = std::sqrt(std::pow(ptNumeratorError / yield_total, 2) + std::pow(ptNumerator * yield_total_error /(yield_total * yield_total), 2));
+            }
 
             auto pos = std::find(centKeysLambdaAntiLambda.begin(), centKeysLambdaAntiLambda.end(), key);
 
@@ -718,8 +749,10 @@ void V0sNchEnergySpectrum(){
             int iCent = std::distance(centKeysLambdaAntiLambda.begin(), pos) + 1;
 
             hLambdaAntiLambdaYieldCent->SetBinContent(iCent, yield_total);
+            hLambdaAntiLambdaYieldCent->SetBinError(iCent, yield_total_error);
             hLambdaAntiLambdaExtrapFrac->SetBinContent(iCent, frac_extrap);
             hLambdaAntiLambdaMeanPtCent->SetBinContent(iCent, meanPt);
+            hLambdaAntiLambdaMeanPtCent->SetBinError(iCent, ptMeanError);
 
             if(yield_total > 0) {
                 std::cout << "Centrality Bin " << iCent << "  Measured Yield = " << yield_measured << "  Extrapolated Yield = " << yield_extrap << "  Total Yield = " << yield_total << std::endl;
@@ -751,13 +784,13 @@ void V0sNchEnergySpectrum(){
         hLambdaAntiLambdaYieldCent->SetMarkerSize(1.2);
         hLambdaAntiLambdaYieldCent->SetMarkerColor(kRed+1);
         hLambdaAntiLambdaYieldCent->SetLineColor(kRed+1);
-        hLambdaAntiLambdaYieldCent->Draw("P");
+        hLambdaAntiLambdaYieldCent->Draw("PE");
         cLambdaAntiLambdaYield->cd(2);
         hLambdaAntiLambdaExtrapFrac->SetMarkerStyle(kFullTriangleUp);
         hLambdaAntiLambdaExtrapFrac->SetMarkerSize(1.2);
         hLambdaAntiLambdaExtrapFrac->SetMarkerColor(kRed+1);
         hLambdaAntiLambdaExtrapFrac->SetLineColor(kRed+1);
-        hLambdaAntiLambdaExtrapFrac->Draw("P");
+        hLambdaAntiLambdaExtrapFrac->Draw("PE");
         cLambdaAntiLambdaYield->Write();
 
         TCanvas* cLambdaAntiLambdaMeanPt = new TCanvas("cLambdaAntiLambdaMeanPt","#Lambda + #bar{#Lambda} Average Mean Pt vs Centrality",800, 600);
@@ -766,25 +799,28 @@ void V0sNchEnergySpectrum(){
         hLambdaAntiLambdaMeanPtCent->SetMarkerSize(1.2);
         hLambdaAntiLambdaMeanPtCent->SetMarkerColor(kRed+1);
         hLambdaAntiLambdaMeanPtCent->SetLineColor(kRed+1);
-        hLambdaAntiLambdaMeanPtCent->Draw("P");
+        hLambdaAntiLambdaMeanPtCent->Draw("PE");
         cLambdaAntiLambdaMeanPt->Write();
 
         if(hNchLambdaAntiLambdaBins->GetNbinsX() == hLambdaAntiLambdaYieldCent->GetNbinsX()){
             int nBins = hLambdaAntiLambdaYieldCent->GetNbinsX();
-            std::vector<double> x, y;
+            std::vector<double> x, y, ex, ey;
 
             for (int i = 1; i <= nBins; i++) {
 
                 double xval = hNchLambdaAntiLambdaBins->GetBinContent(i);
                 double yval = hLambdaAntiLambdaYieldCent->GetBinContent(i);
 
+                double xerr = hNchLambdaAntiLambdaBins->GetBinError(i);
                 double yerr = hLambdaAntiLambdaYieldCent->GetBinError(i);
 
                 x.push_back(xval);
                 y.push_back(yval);
+                ex.push_back(xerr);
+                ey.push_back(yerr);
             }
 
-            gLambdaAntiLambdaNch =new TGraph(x.size(),x.data(), y.data());
+            gLambdaAntiLambdaNch =new TGraphErrors(x.size(),x.data(), y.data(), ex.data(), ey.data());
 
             gLambdaAntiLambdaNch->SetTitle("#Lambda + #bar{#Lambda} Average Yield vs N_{ch};N_{ch};Average Yield");
             gLambdaAntiLambdaNch->SetName("gLambdaAntiLambdaNch");
@@ -793,8 +829,6 @@ void V0sNchEnergySpectrum(){
             TCanvas* c = new TCanvas("cLambdaAntiLambdaYieldVsNch","",800,600);
             gLambdaAntiLambdaNch->Draw("AP");
             gLambdaAntiLambdaNch->Write();
-
-
         }
         else {
             std::cerr << "Error: hNchLambdaAntiLambdaBins and hLambdaAntiLambdaYieldCent have different number of bins!" << std::endl;
@@ -843,8 +877,8 @@ void V0sNchEnergySpectrum(){
     hNchK0shBins->SetLineColor(kRed);
 
     hNchGeneratedBins->SetTitle(";Centrality (%);<N_{ch}>");
-    hNchGeneratedBins->Draw("P");
-    hNchK0shBins->Draw("P SAME");
+    hNchGeneratedBins->Draw("PE");
+    hNchK0shBins->Draw("PE SAME");
 
 
     TLegend* legNchCompare =new TLegend(0.55,0.70,0.85,0.85);
@@ -867,7 +901,7 @@ void V0sNchEnergySpectrum(){
     hNchCorrectionRatio->SetMarkerSize(1.0);
     hNchCorrectionRatio->GetYaxis()->SetRangeUser(0.8,1.2);
     hNchCorrectionRatio->GetYaxis()->SetNdivisions(505);
-    hNchCorrectionRatio->Draw("P");
+    hNchCorrectionRatio->Draw("PE");
 
     // Optional: draw unity line
     TLine* unity = new TLine(hNchCorrectionRatio->GetXaxis()->GetXmin(),1.0,hNchCorrectionRatio->GetXaxis()->GetXmax(),1.0);
@@ -904,7 +938,7 @@ void V0sNchEnergySpectrum(){
         gK0shNch->SetMinimum(0);
 
         // Overlay Lambdas
-        gLambdaAntiLambdaNch->Draw("P SAME");
+        gLambdaAntiLambdaNch->Draw("PE SAME");
 
         TLegend* leg = new TLegend(0.15, 0.73, 0.30, 0.88);
 
@@ -938,7 +972,7 @@ void V0sNchEnergySpectrum(){
         gK0shMeanPtNch->GetXaxis()->SetLimits(0, 25);          // Nch range
         gK0shMeanPtNch->GetYaxis()->SetRangeUser(0.5, 1.5);    // <pT> range
 
-        gLambdaAntiLambdaMeanPtNch->Draw("P SAME");
+        gLambdaAntiLambdaMeanPtNch->Draw("PE SAME");
 
         TLegend* legMeanPt = new TLegend(0.15,0.75,0.35,0.88);
         legMeanPt->AddEntry(gK0shMeanPtNch,"K^{0}_{S}","p");

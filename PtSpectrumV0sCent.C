@@ -1,6 +1,6 @@
 #include "AnalysisLibrary.cxx"
 
-void CalculateSignal(const std::string& particle, const std::string& histSuffix, const std::vector<std::string>& ptbins, std::vector<double_t>& signal, TFile* file, TDirectory* centdir, int mcflag, std::vector<double_t>& mc_sig_low, std::vector<double_t>& mc_sig_high, std::vector<double_t>& peakpt, std::vector<double_t>& widthpt, int nhistos, float cent_low, float cent_high, TH2D* hStatError, TH2D* hRelStatError){
+void CalculateSignal(const std::string& particle, const std::string& histSuffix, const std::vector<std::string>& ptbins, std::vector<double_t>& signal, TFile* file, TDirectory* centdir, int mcflag, std::vector<double_t>& mc_sig_low, std::vector<double_t>& mc_sig_high, std::vector<double_t>& peakpt, std::vector<double_t>& widthpt, int nhistos, float cent_low, float cent_high, TH2D* hStatError, TH2D* hRelStatError, std::vector<double_t>& reducedChi2, const std::string& fitFunction, const std::string& bkgOrder, float systInvMassRangeScale){
     Double_t M_low = 0.45;
     Double_t M_high = 0.55;
 
@@ -49,239 +49,405 @@ void CalculateSignal(const std::string& particle, const std::string& histSuffix,
         if (TString(particle).Contains("AntiLambda", TString::kIgnoreCase)) {
             particleMass = 1.115683;
             latexTitle = "\\bar{\\Lambda} Invariant Mass";
-         // extend fitting window for AntiLambda
             M_low = 1.08; M_high = 1.16;
         } else if (TString(particle).Contains("Lambda", TString::kIgnoreCase)) {
             particleMass = 1.115683;
             latexTitle = "\\Lambda Invariant Mass";
-         // extend fitting window for Lambda
             M_low = 1.08; M_high = 1.16;
         }
 
-      // Sig + Backg = voigt + polynomial
-        TF1* ff = new TF1("fitVoigt", "[0]*TMath::Voigt(x - [1], [2], [3])+pol2(4)", M_low, M_high);
-        ff->SetNpx(1000);
-      // Particle-dependent initial parameters and limits
-        if (TString(particle).Contains("AntiLambda", TString::kIgnoreCase)) {
-         // Antilambda: wider mass region and larger widths
-            double init_sigma = 0.006;
-            double init_gamma = 0.006;
-            ff->SetParameters(1e-2*norm, particleMass, init_sigma, init_gamma, 3e-3, 0, 1e-3, 0);
-            ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
-            ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
-            ff->SetParLimits(2, 0.001, 0.02);
-            ff->SetParLimits(3, 0.002, 0.02);
-        } else if (TString(particle).Contains("Lambda", TString::kIgnoreCase)) {
-         // Lambda: similar to AntiLambda
-            double init_sigma = 0.006;
-            double init_gamma = 0.006;
-            ff->SetParameters(1e-2*norm, particleMass, init_sigma, init_gamma, 3e-3, 0, 1e-3, 0);
-            ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
-            ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
-            ff->SetParLimits(2, 0.001, 0.02);
-            ff->SetParLimits(3, 0.001, 0.02);
+        // -------------------------------------------------------------
+        // Construct Signal (+ Optional Background) Formula dynamically
+        // -------------------------------------------------------------
+        std::string sigFormula = "";
+        int bkgStartIndex = 0;
+
+        cout<< "Fit Function: " << fitFunction << " | Background Order: " << bkgOrder << " | mcflag: " << mcflag << endl;
+
+        if (fitFunction == "Voigt") {
+            sigFormula = "[0]*TMath::Voigt(x - [1], [2], [3])";
+            bkgStartIndex = 4;
+        } else if (fitFunction == "Gaussian") {
+            sigFormula = "[0]*TMath::Gaus(x, [1], [2])";
+            bkgStartIndex = 3; 
+        } else if (fitFunction == "Double-Gaussian") {
+            sigFormula = "[0]*( [4]*TMath::Gaus(x,[1],[2]) + (1-[4])*TMath::Gaus(x,[1],[3]) )";
+            bkgStartIndex = 5;
+        } else if (fitFunction == "Breit-Wigner") {
+            sigFormula = "[0]*TMath::BreitWigner(x, [1], [2])";
+            bkgStartIndex = 3;
+        } else if (fitFunction == "Bukin") {
+            sigFormula = "ROOT::Math::BukinPdf(x, [0], [1], [2], [3], [4])";
+            bkgStartIndex = 5;
         } else {
-         // Default: K0s
-            ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.003, 3e-3, 0, 1e-3, 0);
-            ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
-            ff->SetParLimits(1, 0.4965, 0.4985);
-            ff->SetParLimits(2, 0.001, 0.008);
-            ff->SetParLimits(3, 0.001, 0.008);
+            sigFormula = "[0]*TMath::Voigt(x - [1], [2], [3])";
+            bkgStartIndex = 4;
         }
-      // Common polynomial parameter limits
-        ff->SetParLimits(4, 0., 1.11e3);
-        ff->SetParLimits(5, 0., 1.11e3);
-        ff->SetParLimits(6, 0., 1.11e3);
-      //
-        cout<<"Invariant Mass Plot to be fitted Pt ranges: "<<histptbinsnames[i]<<" to "<<histptbinsnames[i+1]<<" and Centrality:  "<<cent_low<<" to "<<cent_high<<endl;
-        //h1->Fit(ff,"LB");   //L is used instead of Minuit and B is for the setparlimits() to take effect
-        TFitResultPtr fitResult = h1->Fit(ff, "S LB");
+
+        // Only add background formula if mcflag == 0
+        std::string fullFormula = sigFormula;
+        if (mcflag == 0) {
+            fullFormula += "+" + bkgOrder + "(" + std::to_string(bkgStartIndex) + ")";
+        }
+
+        TF1* ff = new TF1("fitFunction", fullFormula.c_str(), M_low, M_high);
+        ff->SetNpx(1000);
+
+        // -------------------------------------------------------------
+        // Set Initial Parameters and Limits based on Fit Function
+        // -------------------------------------------------------------
+        bool isLambda = TString(particle).Contains("Lambda", TString::kIgnoreCase);
+
+        if (fitFunction == "Voigt") {
+            if (isLambda) {
+                double init_sigma = 0.006;
+                double init_gamma = 0.006;
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, init_sigma, init_gamma, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, init_sigma, init_gamma);
+                    ff->SetParNames("norm","mean","sigma","gamma");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.001, 0.02);
+                ff->SetParLimits(3, 0.002, 0.02);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.003, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.003);
+                    ff->SetParNames("norm","mean","sigma","gamma");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.008);
+                ff->SetParLimits(3, 0.001, 0.008);
+            }
+        } else if (fitFunction == "Gaussian") {
+            if (isLambda) {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006);
+                    ff->SetParNames("norm","mean","sigma");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.001, 0.02);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003);
+                    ff->SetParNames("norm","mean","sigma");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.008);
+            }
+        } else if (fitFunction == "Double-Gaussian") {
+            if (isLambda) {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.004, 0.009, 0.5, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "sigma1", "sigma2", "frac", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.004, 0.009, 0.5);
+                    ff->SetParNames("norm", "mean", "sigma1", "sigma2", "frac");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.001, 0.015);
+                ff->SetParLimits(3, 0.003, 0.03);
+                ff->SetParLimits(4, 0.0, 1.0);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.002, 0.005, 0.5, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "sigma1", "sigma2", "frac", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.002, 0.005, 0.5);
+                    ff->SetParNames("norm", "mean", "sigma1", "sigma2", "frac");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.008);
+                ff->SetParLimits(3, 0.002, 0.015);
+                ff->SetParLimits(4, 0.0, 1.0);
+            }
+        } else if (fitFunction == "Breit-Wigner") {
+            if (isLambda) {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "width", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006);
+                    ff->SetParNames("norm", "mean", "width");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.002, 0.05);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "width", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003);
+                    ff->SetParNames("norm", "mean", "width");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.02);
+            }
+        } else if (fitFunction == "Bukin") {
+            if (isLambda) {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 0.0, 0.0, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "sigma", "xi", "rho", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 0.0, 0.0);
+                    ff->SetParNames("norm", "mean", "sigma", "xi", "rho");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.001, 0.02);
+                ff->SetParLimits(3, -0.5, 0.5);
+                ff->SetParLimits(4, -0.5, 0.5);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.0, 0.0, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm", "mean", "sigma", "xi", "rho", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.0, 0.0);
+                    ff->SetParNames("norm", "mean", "sigma", "xi", "rho");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.008);
+                ff->SetParLimits(3, -0.5, 0.5);
+                ff->SetParLimits(4, -0.5, 0.5);
+            }
+        } else {
+            if (isLambda) {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 0.006, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.006, 0.006);
+                    ff->SetParNames("norm","mean","sigma","gamma");
+                }
+                ff->SetParLimits(1, particleMass - 0.005, particleMass + 0.005);
+                ff->SetParLimits(2, 0.001, 0.02);
+                ff->SetParLimits(3, 0.002, 0.02);
+            } else {
+                if (mcflag == 0) {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.003, 3e-3, 0, 1e-3);
+                    ff->SetParNames("norm","mean","sigma","gamma", "p_{0}", "p_{1}", "p_{2}");
+                } else {
+                    ff->SetParameters(1e-2*norm, particleMass, 0.003, 0.003);
+                    ff->SetParNames("norm","mean","sigma","gamma");
+                }
+                ff->SetParLimits(1, 0.4965, 0.4985);
+                ff->SetParLimits(2, 0.001, 0.008);
+                ff->SetParLimits(3, 0.001, 0.008);
+            }
+        }
+
+        // Apply background parameter limits only if mcflag == 0
+        if (mcflag == 0) {
+            if (bkgOrder == "pol1" || bkgOrder == "pol2" || bkgOrder == "pol3") {
+                ff->SetParLimits(bkgStartIndex, 0.0, 1e9);     // p0 must be >= 0
+            }
+        }
+
+        cout << "Invariant Mass Plot to be fitted Pt ranges: " << histptbinsnames[i] << " to " << histptbinsnames[i+1] << " and Centrality: " << cent_low << " to " << cent_high << " with Fit Function: " << fitFunction << endl;
+        TFitResultPtr fitResult = h1->Fit(ff, "S B");
 
         Double_t *pars = ff->GetParameters(); 
         Double_t mean = pars[1];
-        Double_t sigma = abs(pars[2]);
-        Double_t gamma = abs(pars[3]);
-        Double_t fwhm_voigt = 0.5346 * pars[3] + sqrt(0.2166 * pow(pars[3], 2) + pow(pars[2], 2)); //whiting aproximation accuracy of 0.02% https://opg.optica.org/josa/fulltext.cfm?uri=josa-63-8-987&id=55040
-        Double_t sig_low = mean - 3.0*fwhm_voigt; //The 1.5 range gives us ~90.84% of the singal, calculated manually
-        Double_t sig_high = mean + 3.0*fwhm_voigt;
-        cout <<"Mean:" << mean << " Sigma=" << sigma << " Gamma:" << gamma << " FWHM:" << fwhm_voigt << "low:" << sig_low << " high:" << sig_high << std::endl;
-        if(mcflag==0){
-            mc_sig_low[i]=sig_low;
-            mc_sig_high[i]=sig_high;
-            cout <<"mclowsaved:" << mc_sig_low[i] << "mchighsaved:" << mc_sig_high[i] << std::endl;
-         //cout << "DEBUG (mcflag=0): mc_sig_low[" << i << "] = " << mc_sig_low[i] << ", mc_sig_high[" << i << "] = " << mc_sig_high[i] << endl;
+        Double_t sigma = std::abs(pars[2]);
+        
+        Double_t widthVal = 0.0;
+        if (fitFunction == "Voigt") {
+            Double_t gamma = std::abs(pars[3]);
+            widthVal = 0.5346 * gamma + std::sqrt(0.2166 * std::pow(gamma, 2) + std::pow(sigma, 2));
+        } else if (fitFunction == "Gaussian") {
+            widthVal = 3.0 * sigma;
+        } else if (fitFunction == "Double-Gaussian") {
+            Double_t frac = pars[4];
+            Double_t s1 = std::abs(pars[2]);
+            Double_t s2 = std::abs(pars[3]);
+            Double_t sigEff = std::sqrt(frac * std::pow(s1, 2) + (1.0 - frac) * std::pow(s2, 2));
+            widthVal = 3.0 * sigEff;
+        } else if (fitFunction == "Breit-Wigner") {
+            widthVal = sigma; 
+        } else if (fitFunction == "Bukin") {
+            widthVal = 3.0 * sigma; 
+        } else {
+            Double_t gamma = std::abs(pars[3]);
+            widthVal = 0.5346 * gamma + std::sqrt(0.2166 * std::pow(gamma, 2) + std::pow(sigma, 2));
         }
-      //for MC we count the bins based on the same Pt bin integration range
-        if(mcflag==1){
-            sig_low=mc_sig_low[i];
-            sig_high=mc_sig_high[i];
-            cout <<"mclowused:" << mc_sig_low[i] << "mchighused:" << mc_sig_high[i] << std::endl;
+
+        Double_t sig_low = mean - (widthVal * systInvMassRangeScale); 
+        Double_t sig_high = mean + (widthVal * systInvMassRangeScale);
+
+        if (mcflag == 0) {
+            mc_sig_low[i] = sig_low;
+            mc_sig_high[i] = sig_high;
         }
-      
-      //
-      // Signal+Backg from bin counts
-      //
+        if (mcflag == 1) {
+            sig_low = mc_sig_low[i];
+            sig_high = mc_sig_high[i];
+        }
+
+        // Fit Diagnostics
+        Double_t chi2 = fitResult->Chi2();
+        Int_t ndf = fitResult->Ndf();
+        Double_t fittedreducedChi2 = (ndf > 0) ? chi2 / ndf : -1.0;
+        reducedChi2[i] = fittedreducedChi2;
+
         Int_t i_low = h1->FindBin(sig_low);
         Int_t i_high = h1->FindBin(sig_high);
-        cout <<"low:" << sig_low << " high:" << sig_high << std::endl;
-        Double_t sigplusbckg = h1->Integral(i_low,i_high);
-        std::cout << "sig+bckg:" << sigplusbckg << std::endl;
+        Double_t sigplusbckg = h1->Integral(i_low, i_high);
 
-      // Bacgkround Draw
-        TF1* fpol= new TF1("fpol","pol2",M_low,M_high);
-        fpol->SetParameters(pars[4],pars[5],pars[6]);
-      
-      // Voigt to Draw
-        TF1* voigt= new TF1("voigt","[0]*TMath::Voigt(x - [1], [2], [3])",M_low,M_high);
-        voigt->SetParameters(pars[0],pars[1],pars[2],pars[3]);
+        // --- Background & Signal Draw Functions ---
+        TF1* fpol = nullptr;
+        if (mcflag == 0) {
+            fpol = new TF1("fpol", bkgOrder.c_str(), M_low, M_high);
+            if (bkgOrder == "pol1") {
+                fpol->SetParameters(pars[bkgStartIndex], pars[bkgStartIndex+1]);
+            } else if (bkgOrder == "pol2") {
+                fpol->SetParameters(pars[bkgStartIndex], pars[bkgStartIndex+1], pars[bkgStartIndex+2]);
+            } else if (bkgOrder == "pol3") {
+                fpol->SetParameters(pars[bkgStartIndex], pars[bkgStartIndex+1], pars[bkgStartIndex+2], pars[bkgStartIndex+3]);
+            } else if (bkgOrder == "exp") {
+                fpol->SetParameters(pars[bkgStartIndex], pars[bkgStartIndex+1]);
+            }
+        }
 
-        TF1* totalfit= new TF1("TotalFit","[0]*TMath::Voigt(x - [1], [2], [3])+pol2(4)",M_low,M_high); 
-        totalfit->SetParameters(pars[0],pars[1],pars[2],pars[3],pars[4],pars[5],pars[6]);
+        TF1* signalDraw = new TF1("signalDraw", sigFormula.c_str(), M_low, M_high);
+        if (fitFunction == "Voigt") {
+            signalDraw->SetParameters(pars[0], pars[1], pars[2], pars[3]);
+        } else if (fitFunction == "Gaussian") {
+            signalDraw->SetParameters(pars[0], pars[1], pars[2]);
+        } else if (fitFunction == "Double-Gaussian") {
+            signalDraw->SetParameters(pars[0], pars[1], pars[2], pars[3], pars[4]);
+        } else if (fitFunction == "Breit-Wigner") {
+            signalDraw->SetParameters(pars[0], pars[1], pars[2]);
+        } else if (fitFunction == "Bukin") {
+            signalDraw->SetParameters(pars[0], pars[1], pars[2], pars[3], pars[4]);
+        }
+
+        TF1* totalfit = new TF1("TotalFit", fullFormula.c_str(), M_low, M_high);
+        for (int p = 0; p < ff->GetNpar(); ++p) {
+            totalfit->SetParameter(p, pars[p]);
+        }
       
-      // --- Draw histogram first to establish axes ---
-        TCanvas *fitcheck = new TCanvas("fit_check", "fit_check", 600, 600);
+        // --- Canvas and Drawing ---
+        TCanvas *fitcheck = new TCanvas(Form("fit_check_%d_mc%d", i, mcflag), Form("fit_check_%d_mc%d", i, mcflag), 600, 600);
         h1->GetYaxis()->SetTitle("Entries");
-        h1->Draw();  // Draw first for axis and scaling
-        fitcheck->Update();  // <--- This is key to ensure axis limits are computed
+        h1->Draw();  
+        fitcheck->Update();  
         gPad->SetTicky();
 
-      // --- Create filled histogram for signal region ---
         TH1F* hfill = (TH1F*)h1->Clone("hfill");
-        hfill->Reset();  // Zero out contents
+        hfill->Reset();  
 
         int bin_low = h1->FindBin(sig_low);
         int bin_high = h1->FindBin(sig_high);
-      // Get bin widths for proper edge calculation
-        double bin_low_edge = h1->GetBinLowEdge(bin_low);                           // Left edge of low bin
-        double bin_high_edge = h1->GetBinLowEdge(bin_high) + h1->GetBinWidth(bin_high);  // Right edge of high bin
+        double bin_low_edge = h1->GetBinLowEdge(bin_low);                           
+        double bin_high_edge = h1->GetBinLowEdge(bin_high) + h1->GetBinWidth(bin_high);  
 
         TLine *llow = new TLine(bin_low_edge, 0, bin_low_edge, fitcheck->GetUymax());
         TLine *lhigh = new TLine(bin_high_edge, 0, bin_high_edge, fitcheck->GetUymax());
         llow->SetLineColor(kOrange-9); llow->SetLineStyle(2); llow->SetLineWidth(3); llow->Draw("same");
-        lhigh->SetLineColor(kOrange-9); lhigh->SetLineStyle(2);lhigh->SetLineWidth(3); lhigh->Draw("same");
+        lhigh->SetLineColor(kOrange-9); lhigh->SetLineStyle(2); lhigh->SetLineWidth(3); lhigh->Draw("same");
 
         for (int b = bin_low; b <= bin_high; ++b) {
             hfill->SetBinContent(b, h1->GetBinContent(b));
         }
         hfill->SetFillColor(kOrange-9);
         hfill->SetLineColor(kOrange-9);
-        hfill->SetFillStyle(3002);  //
+        hfill->SetFillStyle(3002);  
+        hfill->Draw("hist same");  
 
-      // --- Draw filled histogram in the background ---
-        hfill->Draw("hist same");  // Draw as histogram (not points) but in background
+        if (mcflag == 0 && fpol) {
+            fpol->SetLineColor(kGreen-3);
+            fpol->Draw("same");
+        }
 
-      // --- Overlay fit functions ---
-        fpol->SetLineColor(kGreen-3);
-        fpol->Draw("same");
-
-        voigt->SetLineColor(kMagenta+1);
-        voigt->SetNpx(1000);
-        voigt->Draw("same");
+        signalDraw->SetLineColor(kMagenta+1);
+        signalDraw->SetNpx(1000);
+        signalDraw->Draw("same");
 
         totalfit->SetLineColor(kRed+1);
         totalfit->SetNpx(1000);
         totalfit->Draw("same");
 
-      // Draw outline over the filled area
         TH1F* houtline = (TH1F*)hfill->Clone("houtline");
-        houtline->SetFillStyle(0);               // No fill
-        houtline->SetLineColor(kOrange-9);     // Outline color
-        houtline->SetLineWidth(2);               // Thicker line
-        houtline->Draw("hist same");             // Draw as outline
+        houtline->SetFillStyle(0);               
+        houtline->SetLineColor(kOrange-9);     
+        houtline->SetLineWidth(2);               
+        houtline->Draw("hist same");             
 
-      // --- Draw real histogram on top ---
-        h1->SetMarkerStyle(20);   // filled circle
-        h1->SetMarkerSize(1.0);   // bigger size (try 2.0–4.0 depending on preference)
+        h1->SetMarkerStyle(20);   
+        h1->SetMarkerSize(1.0);   
         h1->SetMarkerColor(kAzure);
-        h1->Draw("same PE");        // P for points
+        h1->Draw("same PE");        
 
         TLatex *latexinv = new TLatex();
-        latexinv->SetNDC();  // Normalized device coordinates
-        latexinv->SetTextSize(0.045);  // Size to match your plot
-      // Starting position (x = 0.15, y = 0.85) and line spacing (~0.04)
+        latexinv->SetNDC();  
+        latexinv->SetTextSize(0.045);  
         latexinv->DrawLatex(0.15, 0.80, latexTitle);
-        latexinv->SetTextSize(0.03);  // Size to match your plot
+        latexinv->SetTextSize(0.03);  
         latexinv->DrawLatex(0.15, 0.72, "pp, #sqrt{#it{s}} = " + AO2DFiles.energy);
         TString latexLabel = TString::Format("%s #leq #it{p}_{T} < %s GeV/#it{c}", ptbins[i].c_str(), ptbins[i+1].c_str());
         latexinv->DrawLatex(0.15, 0.67, latexLabel);
         latexinv->DrawLatex(0.15, 0.62, Form("Centrality %.0f%% to %.0f%%", cent_low, cent_high));
 
-      // Create legend in a suitable position (adjust coordinates as needed)
-        TLegend* legend = new TLegend(0.6, 0.65, 0.88, 0.88);  // x1,y1,x2,y2 normalized coords
-
-      // Add entries
-        legend->AddEntry(h1, "Data", "lp");                 // Marker (points)
-        legend->AddEntry(hfill, "Signal+Background", "f");     // filled histogram with fill style
-        legend->AddEntry(fpol, "Background Fit", "lp");     // Line 
-        legend->AddEntry(voigt, "Voigt Fit", "lp");         // Line
-        legend->AddEntry(totalfit, "Total Fit", "lp");      // Line
-
-        legend->SetBorderSize(0);  // Optional: remove border box
-        legend->SetFillStyle(0);   // Optional: transparent background
+        TLegend* legend = new TLegend(0.6, 0.65, 0.88, 0.88);  
+        legend->AddEntry(h1, (mcflag == 0 ? "Data" : "MC Signal"), "lp");                 
+        legend->AddEntry(hfill, (mcflag == 0 ? "Signal+Background" : "MC Signal Range"), "f");     
+        if (mcflag == 0 && fpol) {
+            legend->AddEntry(fpol, "Background Fit", "lp");     
+        }
+        legend->AddEntry(signalDraw, (fitFunction + " Fit").c_str(), "lp");         
+        legend->AddEntry(totalfit, (mcflag == 0 ? "Total Fit" : "Signal Fit"), "lp");      
+        legend->SetBorderSize(0);  
+        legend->SetFillStyle(0);   
         legend->Draw("same");
 
-      // --- Save canvas ---
-        TDirectory* prevdir = gDirectory; //save current directory
-        centdir->cd(); //move to directory I want to save canvas
-      // Save canvas into the directory
+        TDirectory* prevdir = gDirectory; 
+        centdir->cd(); 
         fitcheck->Write(fmt::format("{}_{}_{}", histname, ptbins[i], ptbins[i+1]).data());
-        prevdir->cd(); //return to previous directory where the rest of the histograms to be fitted are
+        prevdir->cd(); 
 
-        Double_t bckg = fpol->Integral(sig_low,sig_high);
-        cout << "bckg:" << bckg/h1->GetBinWidth(0) << std::endl;
-        Double_t realbckg = bckg/h1->GetBinWidth(0);
-        if(mcflag==1){
-            realbckg=0.;
+        Double_t bckg = (mcflag == 0 && fpol) ? fpol->Integral(sig_low, sig_high) : 0.0;
+        Double_t realbckg = bckg / h1->GetBinWidth(0);
+        if (mcflag == 1) {
+            realbckg = 0.;
         }
-        signal[i]=sigplusbckg-realbckg;
-        peakpt[i]=pars[1];
-        widthpt[i]=fwhm_voigt;
-        cout<<"Signal:"<<signal[i]<<endl<<"Number of Plot:"<<i+1<<endl;
+        signal[i] = sigplusbckg - realbckg;
+        peakpt[i] = pars[1];
+        widthpt[i] = widthVal;
+        cout<< "Signal plus background: " << sigplusbckg << " | Signal: " << signal[i] << " | Background: " << realbckg << endl;
 
-        //
-        // Error propagation
-        //
-        //Stat Error from the Signal+Background counts
+        // Error Propagation (Stat errors)
         Double_t sigplusbckgError2 = 0.0;
-
         for (Int_t b = i_low; b <= i_high; ++b) {
             Double_t err = h1->GetBinError(b);
             sigplusbckgError2 += err * err;
         }
         Double_t sigplusbckgError = TMath::Sqrt(sigplusbckgError2);
 
-        //Stat Error from the background fit
-        TMatrixDSym cov = fitResult->GetCovarianceMatrix();
-        Double_t binWidth = h1->GetBinWidth(0);
-
-        Double_t dBdp4 = (sig_high - sig_low) / binWidth;
-        Double_t dBdp5 = (sig_high * sig_high - sig_low * sig_low) / (2.0 * binWidth);
-        Double_t dBdp6 = (pow(sig_high, 3) - pow(sig_low, 3)) / (3.0 * binWidth);
-
-        Double_t bckgError2 = dBdp4 * dBdp4 * cov(4,4) + dBdp5 * dBdp5 * cov(5,5) + dBdp6 * dBdp6 * cov(6,6) + 2.0 * dBdp4 * dBdp5 * cov(4,5) + 2.0 * dBdp4 * dBdp6 * cov(4,6) + 2.0 * dBdp5 * dBdp6 * cov(5,6);
-        Double_t bckgError = TMath::Sqrt(bckgError2);
-
-        //Stat Error 1: Singnal Extraction Error (independent? they are from the same histogram, but one is from the fit and the other is from the bin counts)
-        Double_t signalError =
-        TMath::Sqrt(sigplusbckgError * sigplusbckgError + bckgError * bckgError);
+        Double_t signalError = sigplusbckgError; 
 
         if (mcflag == 0) {
-            // Error Stage 1: Invariant mass / signal extraction
             hStatError->SetBinContent(1, i + 1, signalError);
             hRelStatError->SetBinContent(1, i + 1, 100.0 * signalError / signal[i]);
-
-            // Label the analysis stage
             hStatError->GetXaxis()->SetBinLabel(1, "Inv. mass");
             hRelStatError->GetXaxis()->SetBinLabel(1, "Inv. mass");
         }
-    //end of error propagation
-    }//histo loop
+    }
     return;
 }
 //
 //PlottingFunction
 //
-void PlotSignal(const std::string& particle, const std::vector<std::string>& ptbins, TFile* file, AO2DConfig& AO2DFiles, TDirectory* centdir, float cent_low, float cent_high, int centralityIndex){
+void PlotSignal(const std::string& particle, const std::vector<std::string>& ptbins, TFile* file, AO2DConfig& AO2DFiles, TDirectory* centdir, float cent_low, float cent_high, int centralityIndex, bool Systematics_Analysis) {
     //
     //
 // Initializing measured and reconstructed signals to be calculated from inv mass pltos
@@ -296,6 +462,47 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     std::vector<Double_t> width_reconstructed(nhistos);
     std::vector<Double_t> mc_sig_low(nhistos);
     std::vector<Double_t> mc_sig_high(nhistos);
+    std::vector<Double_t> reducedChi2_data(nhistos);
+    std::vector<Double_t> reducedChi2_mc(nhistos);
+    std::vector<Double_t> reducedChi2_mc_split(nhistos);
+
+
+    //********************************************************************************/
+    //Systematics to be processed (Default is Double-Gaussian + pol2 + 1.0*Range
+   //********************************************************************************/
+    std::string systInvMassFitFunction = "Double-Gaussian";
+    std::string systInvMassBackgroundOrder = "pol2";
+    double systInvMassRangeScale = 1.0;
+
+    // 1. Set default baseline configuration based on the particle type
+    if (particle == "K0sh") {
+        systInvMassFitFunction = "Double-Gaussian";
+        systInvMassBackgroundOrder = "pol2";
+    } else if (particle == "Lambda") {
+        systInvMassFitFunction = "Double-Gaussian";
+        systInvMassBackgroundOrder = "pol2";
+    } else if (particle == "AntiLambda") {
+        systInvMassFitFunction = "Double-Gaussian";
+        systInvMassBackgroundOrder = "pol2";
+    }
+
+    // 2. Override or select specific variations if Systematics Analysis is active
+    if (Systematics_Analysis == true) {
+        // The same for all particles
+        systInvMassFitFunction = "Double-Gaussian"; // e.g., "Voigt", "Gaussian", "Double-Gaussian", "Breit-Wigner", "Bukin Not Yet Implemented"
+        systInvMassBackgroundOrder = "pol2"; // e.g., "pol1", "pol2"
+        // Invariant-mass fit range scale (un-shadowed variable fix)
+        systInvMassRangeScale = 1.1; // Change to 0.8, 0.9, 1.0, 1.1, 1.2 as needed
+    }
+
+    cout << "Particle: " << particle << std::endl;
+    cout << "Systematics Analysis: " << (Systematics_Analysis ? "Enabled" : "Disabled") << std::endl;
+    cout << "Fit Function: " << systInvMassFitFunction << std::endl;
+    cout << "Background Order: " << systInvMassBackgroundOrder << std::endl;
+    cout << "Range Scale: " << systInvMassRangeScale << std::endl;
+    cout << "Systematics Analysis: " << (Systematics_Analysis ? "Enabled" : "Disabled") << std::endl;
+    cout << "Fit Function " << systInvMassFitFunction << std::endl;
+    cout << "Background Order " << systInvMassBackgroundOrder << std::endl;
 
     int mcflag=0;
    //make strings of pt values into double for use
@@ -331,14 +538,17 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     dataroot->cd(datamassSubDir);
     mcflag=0;
     std::string histname;
-    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_measured, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_measured, width_measured, nhistos, cent_low, cent_high, hStatError, hRelStatError);
+    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_measured, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_measured, width_measured, nhistos, cent_low, cent_high, hStatError, hRelStatError, reducedChi2_data, systInvMassFitFunction, systInvMassBackgroundOrder, systInvMassRangeScale);
+
     TH1* hMeasured = new TH1D(Form("%sMeasuredPtSpectrum", particleName.c_str()), Form("%sMeasuredPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     TH1* hPeak = new TH1D(Form("%sPeakvsPtSpectrum", particleName.c_str()), Form("%sPeakvsPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     TH1* hWidth = new TH1D(Form("%sWidthvsPtSpectrum", particleName.c_str()), Form("%sWidthvsPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
+    TH1* hReducedChi2 = new TH1D(Form("%sReducedChi2vsPtSpectrum", particleName.c_str()), Form("%sReducedChi2vsPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     for(int i=0;i<nhistos;i++){
         hMeasured->SetBinContent(i+1,signal_measured[i]);
         hPeak->SetBinContent(i+1,peak_measured[i]);
         hWidth->SetBinContent(i+1,width_measured[i]);
+        hReducedChi2->SetBinContent(i+1,reducedChi2_data[i]);
     }
     TString ptAnalysisSubDir = Form("%s/PtAnalysis", datarootSubDir.Data());
     dataroot->cd(ptAnalysisSubDir);
@@ -400,7 +610,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
    //Getting Histo for Event Efficiency, bin 0.5 is Event Efficiency Denominator and bin 2.5 is Numerator (also Event Split Denomimator)
    //No it's 1.5 and 3.5
     TH1* hNEventsCorrections = ReadAndSaveHistogramProjection("hNEvents_Corrections","hNEvents_CorrectionsSaved",cent_low, cent_high);
-    double nCollisionsGen = hNEventsCorrections->GetBinContent(2);  //<-------CHECK THIS
+    double nCollisionsGen = hNEventsCorrections->GetBinContent(2); // Because we apply cut-Z vertex to both
 
     TH1* hGeneratedXiMinus = nullptr;
     TH1* hGeneratedXiZero = nullptr;
@@ -431,21 +641,25 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     TString mcMassSubDir = Form("%s/%sMassPlotsPerPtBin",mcSubDir.Data(), particleName.c_str());
     mcroot->cd(mcMassSubDir);
     mcflag=1;
-    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_reconstructed, file, centdir,mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError);
+    CalculateSignal(particleName, "Pt_vs_Cent_from", ptbins, signal_reconstructed, file, centdir,mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError, reducedChi2_mc, systInvMassFitFunction, systInvMassBackgroundOrder,systInvMassRangeScale);
 
     TH1* hReconstructedMC = new TH1D(Form("%sReconstructedPtSpectrum", particleName.c_str()), Form("%sReconstructedPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
+    TH1* hReducedChi2MC = new TH1D(Form("%sReducedChi2vsPtSpectrumMC", particleName.c_str()), Form("%sReducedChi2vsPtSpectrumMC", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     for(int i=0;i<nhistos;i++){
         hReconstructedMC->SetBinContent(i+1,signal_reconstructed[i]); //Filling hReconstructed
+        hReducedChi2MC->SetBinContent(i+1,reducedChi2_mc[i]);
     }
    //Getting Histos and Calculating Particle Signal Split
     TString mcMassSplitSubDir = Form("%s/%sSplitMassPlotsPerPtBin",mcSubDir.Data(), particleName.c_str());
     mcroot->cd(mcMassSplitSubDir);
-    CalculateSignal(particleName, "SplitPt_vs_Cent_from", ptbins, signal_split_reconstructed, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError);
+    CalculateSignal(particleName, "SplitPt_vs_Cent_from", ptbins, signal_split_reconstructed, file, centdir, mcflag, mc_sig_low, mc_sig_high, peak_reconstructed, width_reconstructed, nhistos, cent_low, cent_high, hStatError, hRelStatError, reducedChi2_mc_split, systInvMassFitFunction, systInvMassBackgroundOrder,systInvMassRangeScale);
     histname = Form("h%sPt_vs_Cent_from", particleName.c_str());
+
     TH1* hParticleSignalSplitNumerator = new TH1D(Form("h%sSignalSplitNumerator", particleName.c_str()), Form("h%sSignalSplitNumerator", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data());
     for(int i=0;i<nhistos;i++){
-        hParticleSignalSplitNumerator->SetBinContent(i+1,signal_split_reconstructed[i]); //Filling hSignalSplitNumerator
+        hParticleSignalSplitNumerator->SetBinContent(i+1,signal_reconstructed[i]); //Filling hSignalSplitNumerator
     }
+
     TString mcFeeddownSubDir = Form("%s/FeeddownMatrices",mcSubDir.Data());
     mcroot->cd(mcFeeddownSubDir);
    // Feeddown matrices: choose Lambda or AntiLambda matrices depending on particle
@@ -475,6 +689,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hNEventsMC->SetMinimum(0);
     hNV0sMC->SetMinimum(0);
     hParticleCountMC->SetMinimum(0);
+    double nCollisionsMC = hNEventsMC->GetBinContent(1);
 //
 //Access XiMinus+Xiplus Corrected Pt Spectrum downloaded from HEPData for Feeddown. (Run 2 Xi: https://www.hepdata.net/record/ins1748157?version=1 )
 // Only perform Run2 Xi handling for Lambda or AntiLambda (not for K0sh)
@@ -550,22 +765,18 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 
         // Different initial parameters depending on the dataset
         if (AO2DFiles.dataperiod == "ppref24") {
-
             // pp reference (HEPData Figure 1c)
             levyTsallisXi->SetParameters(5e-3, 8.0, 0.40);
             levyTsallisXi->SetParLimits(0, 1e-6, 1.0);   // Normalisation
             levyTsallisXi->SetParLimits(1, 4.0, 20.0);   // n
             levyTsallisXi->SetParLimits(2, 0.10, 1.20);  // C (GeV/c)
-
         }
         else {
-
             // Run 3 Xi pp from Roman
             levyTsallisXi->SetParameters(1e-2, 10.0, 0.30);
             levyTsallisXi->SetParLimits(0, 1e-6, 1.0);
             levyTsallisXi->SetParLimits(1, 4.0, 20.0);
             levyTsallisXi->SetParLimits(2, 0.10, 1.20);
-
         }
 
         xiHisto->Fit(levyTsallisXi, "R");
@@ -615,17 +826,25 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hStatError->GetXaxis()->SetBinLabel(6, "Event efficiency");
     hRelStatError->GetXaxis()->SetBinLabel(6, "Event efficiency");
 
-   
-   //Event Spliting
-    if(hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5))==0){
-        cout<<"ERROR: Event Splitting Denominator is 0!"<<endl;
+    //Event Spliting
+    const int eventSplittingBin = hNEventsCorrections->FindBin(5.5);  //<-------- CHECK THIS
+    const double nRecEventsMC = hNRecEventsMC->GetBinContent(1);
+    const double nEventsCorrections = hNEventsCorrections->GetBinContent(eventSplittingBin);
+    const double nEventsCorrectionsErr = hNEventsCorrections->GetBinError(eventSplittingBin);
+
+    if (nEventsCorrections == 0.0) {
+        cout << "ERROR: Event Splitting Denominator is 0!" << endl;
         return;
     }
 
-    double EventSplitting = hNRecEventsMC->GetEntries()/hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5));
-    double EventSplittingError =std::sqrt(EventSplitting * (1.0 - EventSplitting) / hNEventsCorrections->GetBinContent(hNEventsCorrections->FindBin(3.5)));
+    const double EventSplitting = nRecEventsMC / nEventsCorrections;
+    const double nRecEventsMCErr = (nRecEventsMC > 0.0) ? std::sqrt(nRecEventsMC) : 0.0;
+    const double EventSplittingError = (nRecEventsMC > 0.0)
+        ? EventSplitting * std::sqrt(std::pow(nRecEventsMCErr / nRecEventsMC, 2) + std::pow(nEventsCorrectionsErr / nEventsCorrections, 2))
+        : 0.0;
 
-    TH1* hParticleEventSplitting = new  TH1D(Form("%s Event Splitting", particleName.c_str()), Form("%s Event Splitting", particleName.c_str()), ptbinedges.size()-1,ptbinedges.data());
+    TH1* hParticleEventSplitting = new TH1D(Form("%s Event Splitting", particleName.c_str()), Form("%s Event Splitting", particleName.c_str()), ptbinedges.size() - 1, ptbinedges.data());
+    hParticleEventSplitting->Sumw2();
     for (int bin = 1; bin <= hParticleEventSplitting->GetNbinsX(); ++bin) {
         hParticleEventSplitting->SetBinContent(bin, EventSplitting);
         hParticleEventSplitting->SetBinError(bin, EventSplittingError);
@@ -634,7 +853,6 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hParticleEventSplitting->GetYaxis()->SetTitle("Event Splitting");
     hParticleEventSplitting->SetMarkerStyle(20);  // full circle
     hParticleEventSplitting->SetMarkerSize(1.2);
-
 
     hStatError->GetXaxis()->SetBinLabel(7, "Event splitting");
     hRelStatError->GetXaxis()->SetBinLabel(7, "Event splitting");
@@ -656,12 +874,11 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 //We have taken into account that XiMinus(Plus) and (Anti)XiZero have different feeddown matrices
 //Warning: We assume the Omega contribution is negligible
    //
-   // Calculate the Xi feeddown (works for both Lambda and AntiLambda)
+    // Pointers to the appropriate feeddown matrices based on particle type
     TH1D* hFromXiSignSpectrum = nullptr;
     TH1D* hFromXiNeutralSpectrum = nullptr;
     TH1D* hTotalFeeddown = nullptr;
     TH1D* hTotalFeeddownFraction = nullptr;
-   // Pointers to the appropriate feeddown matrices based on particle type
     TH2D* hFeeddownXiSignMatrix = nullptr;
     TH2D* hFeeddownXiNeutralMatrix = nullptr;
     TH1* hGenXiSign = nullptr;
@@ -776,11 +993,9 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 
    //Particle Signal Splitting
     TH1* hParticleSignalSplitting = (TH1*)hParticleSignalSplitNumerator->Clone(Form("%sSignalSplitting", particleName.c_str()));
-    hParticleSignalSplitting->Divide(hParticleSignalSplitNumerator, hReconstructedMC, 1.0, 1.0,"B");
+    hParticleSignalSplitting->Divide(hParticleSignalSplitting, hReconstructedMC, 1.0, 1.0,"B");
     hParticleSignalSplitting->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleSignalSplitting->GetYaxis()->SetTitle("Signal Splitting");
-
-
 
     hStatError->GetXaxis()->SetBinLabel(5, "Signal splitting");
     hRelStatError->GetXaxis()->SetBinLabel(5, "Signal splitting");
@@ -790,8 +1005,6 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     hParticleEfficiency->Divide(hReconstructedMC, hGeneratedAfterEventSelection, 1.0, 1.0, "B");
     hParticleEfficiency->GetXaxis()->SetTitle("p_{T} (GeV/c)");
     hParticleEfficiency->GetYaxis()->SetTitle("Efficiency");
-
-
 
     hStatError->GetXaxis()->SetBinLabel(3, "V0 efficiency");
     hRelStatError->GetXaxis()->SetBinLabel(3, "V0 efficiency");
@@ -812,6 +1025,7 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     cout<<"Event Efficiency:   "<<EventEfficiency<<endl;
     cout<<"Event Splitting:    "<<EventSplitting<<endl;
     cout<<"1 / nCollisions:   "<<1.0/nCollisionsData<<endl;
+    cout<<"nCollisions:   "<<nCollisionsData<<endl;
     cout<<"Generated Collisiions:  "<<nCollisionsGen<<"  Corrected Reconstructed Collisiions:  "<<1.0/EventeLvlCorrections<<endl; 
     cout<<"////////////////////////////////////////////////////////////////////"<<endl;
     cout<<"/////////////////////////Event Level Corrections////////////////////"<<endl;
@@ -821,10 +1035,10 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
 
     TH1* hCorrectedParticle = new TH1D(Form("%sCorrectedPtSpectrum", particleName.c_str()), Form("%sCorrectedPtSpectrum", particleName.c_str()), ptbinedges.size()-1, ptbinedges.data()); 
     hCorrectedParticle->Add(hMeasured, hTotalFeeddown,1.0, -1.0); 
-    hCorrectedParticle->Divide(hParticleEfficiency);     //errors for independent histos
-    hCorrectedParticle->Divide(hParticleSignalLoss);
-    hCorrectedParticle->Divide(hParticleSignalSplitting);
-   //hCorrectedParticle->Divide(hMeasured,hParticleUltimateEfficiency);
+    //hCorrectedParticle->Divide(hParticleEfficiency);     //errors for independent histos
+    //hCorrectedParticle->Divide(hParticleSignalLoss);
+    //hCorrectedParticle->Divide(hParticleSignalSplitting);
+    hCorrectedParticle->Divide(hParticleUltimateEfficiency);
 
    RecordStatError(hStatError,hRelStatError,8,hCorrectedParticle);
 
@@ -861,8 +1075,8 @@ void PlotSignal(const std::string& particle, const std::vector<std::string>& ptb
     }
 
     //Final Corrected pt Spectrum
-    hCorrectedParticle->Divide(hParticleEventEfficiency);
-    hCorrectedParticle->Divide(hParticleEventSplitting);
+    hCorrectedParticle->Multiply(hParticleEventEfficiency);
+    hCorrectedParticle->Multiply(hParticleEventSplitting);
     hCorrectedParticle->Scale(1.0 / nCollisionsData);
     NormalizeByBinWidth(hCorrectedParticle); //Normalize before fitting
 
@@ -944,16 +1158,8 @@ for (int stage = 1; stage <= 8; ++stage) {
 
         double ptLow  = hRelStatError->GetYaxis()->GetBinLowEdge(bin);
         double ptHigh = hRelStatError->GetYaxis()->GetBinUpEdge(bin);
-
-        double relError =
-            hRelStatError->GetBinContent(stage, bin);
-
-        std::cout << "pT = ["
-                  << ptLow << ", "
-                  << ptHigh
-                  << "] : "
-                  << relError
-                  << " %" << std::endl;
+        double relError =hRelStatError->GetBinContent(stage, bin);
+        std::cout << "pT = [" << ptLow << ", "  << ptHigh  << "] : " << relError << " %" << std::endl;
     }
 }
 //
@@ -977,10 +1183,10 @@ for (int stage = 1; stage <= 8; ++stage) {
 
     // Clone the original histogram to keep original unchanged and multiply by nCollisions so they are comparible
     TH1D *hGeneratedAlpha = (TH1D*)hGenerated->Clone("hGeneratedAlpha");
-    //hGeneratedAlpha->Scale(1.0/nCollisionsGen);
+    hGeneratedAlpha->Scale(1.0/nCollisionsGen);
 
     TH1D *hCorrectedAlpha = (TH1D*)hCorrectedParticle->Clone("hCorrectedAlpha");
-    hCorrectedAlpha->Scale(nCollisionsGen);
+    //hCorrectedAlpha->Scale(nCollisions);
     hCorrectedAlpha->SetMarkerStyle(kFullCircle);
     hCorrectedAlpha->SetMarkerColor(kBlue+1);
     hCorrectedAlpha->SetLineColor(kBlue+1);
@@ -1083,7 +1289,6 @@ for (int stage = 1; stage <= 8; ++stage) {
         obj->Write(name);
     };
 
-
    // Use function to safe save everything into centdir
    //safeWriteObject(cBetaTest, "K0sh Correction Beta Test", centdir);
    //safeWriteObject(FinalFit, "Final Fit of Corrected Pt Spectrum", centdir);
@@ -1122,6 +1327,8 @@ for (int stage = 1; stage <= 8; ++stage) {
     safeWriteObject(hStatErrorEvolution, Form("%s Statistical Error Evolution", particle.c_str()), centdir);
     safeWriteObject(hStatError, Form("%s Statistical Error", particle.c_str()), centdir);
     safeWriteObject(hRelStatError, Form("%s Relative Statistical Error", particle.c_str()), centdir);
+    safeWriteObject(hReducedChi2, Form("%s Reduced Chi2", particle.c_str()), centdir);
+    safeWriteObject(hReducedChi2MC, Form("%s Reduced Chi2 MC", particle.c_str()), centdir);
 
     if (particle == "Lambda" || particle == "AntiLambda") {
         safeWriteObject(hTotalFeeddown, Form("%s Total Feeddown", particle.c_str()), centdir);
@@ -1161,15 +1368,21 @@ int PtSpectrumV0sCent(){
    //AO2D Files to be accessed configuqration
     InitAO2DFiles();
 
-   //Particles to be processed
    //********************************************************************************/
+    //Particles to be processed
    //********************************************************************************/
-   //std::vector<std::string> particles = {"K0sh", "Lambda", "AntiLambda"};
-   std::vector<std::string> particles = {"K0sh"};
+   std::vector<std::string> particles = {"K0sh", "Lambda", "AntiLambda"};
+   //std::vector<std::string> particles = {"K0sh"};
    //std::vector<std::string> particles = {"Lambda"};
    //std::vector<std::string> particles = {"AntiLambda"};
    //std::vector<std::string> particles = {"Lambda", "AntiLambda"};
     bool NchAnalysis = true; //Run Nch Alysis
+    //********************************************************************************/
+    //Systematics to be processed?
+   //********************************************************************************/
+
+   bool Systematics_Analysis = false; // Run Systematics
+
    //********************************************************************************/
    //********************************************************************************/
    //File Where Everything will be Saved
@@ -1238,7 +1451,7 @@ int PtSpectrumV0sCent(){
                 centralityCounter++;
             }
          
-            PlotSignal(particle, *ptBins, F1, AO2DFiles, centDir, cent_low, cent_high, centralityIndex); //Plots Signal for each centrality bin within particle directory
+            PlotSignal(particle, *ptBins, F1, AO2DFiles, centDir, cent_low, cent_high, centralityIndex, Systematics_Analysis); //Plots Signal for each centrality bin within particle directory
 
       // Go back to particle directory
             F1->cd(particle.c_str());
@@ -1289,6 +1502,7 @@ int PtSpectrumV0sCent(){
         std::vector<TH1F*> hNV0sStorage;
         std::vector<TH1F*> hNParticlesStorage;
         std::vector<TH1F*> hPeakStorage, hWidthStorage;
+        std::vector<TH1F*> hReducedChi2Storage, hReducedChi2MCStorage;
         //std::vector<TF1*> fLevyTsallisLambdaStorage, fLevyTsallisAntiLambdaStorage; NOT NEEDED?
 
       // Load Centrality Histograms to Superimpose
@@ -1310,6 +1524,8 @@ int PtSpectrumV0sCent(){
         LoadCentralityHistograms(F1, particle, "Number of Particles", *centBins, hNParticlesStorage);
         LoadCentralityHistograms(F1, particle, "Peak vs Pt Quality Control", *centBins, hPeakStorage);
         LoadCentralityHistograms(F1, particle, "Width vs Pt Quality Control", *centBins, hWidthStorage);
+        LoadCentralityHistograms(F1, particle, "Reduced Chi2", *centBins, hReducedChi2Storage);
+        LoadCentralityHistograms(F1, particle, "Reduced Chi2 MC", *centBins, hReducedChi2MCStorage);
 
         if (particle == "Lambda") {
             LoadCentralityHistograms(F1, particle, "Total Feeddown", *centBins, hTotalFeeddownStorage);
@@ -1365,6 +1581,8 @@ int PtSpectrumV0sCent(){
         TCanvas* cNParticles = DrawCentralityHistoSet(hNParticlesStorage, roman, colors, *centBins,"Number_Particles_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
         TCanvas* cPeak = DrawCentralityHistoSet(hPeakStorage, roman, colors, *centBins,"Peak_vs_Pt_Quality_Control_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
         TCanvas* cWidth = DrawCentralityHistoSet(hWidthStorage, roman, colors, *centBins,"Width_vs_Pt_Quality_Control_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cReducedChi2 = DrawCentralityHistoSet(hReducedChi2Storage, roman, colors, *centBins,"Reduced_Chi2_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
+        TCanvas* cReducedChi2MC = DrawCentralityHistoSet(hReducedChi2MCStorage, roman, colors, *centBins,"Reduced_Chi2_MC_AllCentralities_"+TString(particle), false /*logY*/, false  /*fix axis to 1.0*/, false, false);
 
       //Feeddown only for Lambda and AntiLambda
         TCanvas* cFeeddown = nullptr;
@@ -1514,6 +1732,8 @@ int PtSpectrumV0sCent(){
         if(cNParticles) cNParticles->Write();
         if(cPeak) cPeak->Write();
         if(cWidth) cWidth->Write();
+        if(cReducedChi2) cReducedChi2->Write();
+        if(cReducedChi2MC) cReducedChi2MC->Write();
 
         if (particle == "Lambda" || particle == "AntiLambda") {
             if(cFeeddown) cFeeddown->Write();
@@ -2620,11 +2840,6 @@ int PtSpectrumV0sCent(){
 
             cBaryonMesonRun2Comparison->Write();
         }
-
-
-
-
-
     }//end of particle Loop. WATCH OUT FOR THE BRACKETS!
     F1->Close();
     return 0;

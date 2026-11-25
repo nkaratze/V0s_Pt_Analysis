@@ -9,6 +9,7 @@
 #if !defined(__CLING__) || defined(__ROOTCLING__)
 
 #include <TGraph.h>
+#include <TGraphErrors.h>
 #include <TAxis.h>
 #include <TH1F.h>
 #include <TH1D.h>
@@ -23,6 +24,7 @@
 #include <TLine.h>
 #include <TProfile.h>
 #include <TString.h>
+#include <vector>
 
 #include <cmath>
 #include <iostream>

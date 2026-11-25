@@ -52,7 +52,7 @@ static void InitAO2DFilesForPeriod(DataPeriod period) {
             break;
 
         case DataPeriod::ppref24:
-            AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24appass1Medium732844.root"; //Medium
+            //AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24appass1Medium732844.root"; //Medium
             //AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC24appass1Small732289.root"; //Small
             //AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab6722011.root";
             //AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab6722011.root";
@@ -61,14 +61,14 @@ static void InitAO2DFilesForPeriod(DataPeriod period) {
             AO2DFiles.dataperiod = "ppref24";
 
             //MC Closure Test:
-            //AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsLHC25b4ab62731626ClosureTestDATA.root";
-            AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab62731626ClosureTestMC.root";
-            AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsLHC25b4ab62731626ClosureTestMC.root";
+            AO2DFiles.datarootpath  = "PtSpectrumResults/Data/AnalysisResultsAlphaRun2BinningAlphaTest810409.root";
+            AO2DFiles.mcrootpath    = "PtSpectrumResults/MC/AnalysisResultsAlphaRun2BinningAlphaTest810409.root";
+            AO2DFiles.mcgenrootpath = "PtSpectrumResults/MC/AnalysisResultsAlphaRun2BinningAlphaTest810409.root";
 
             if (AO2DFiles.hyperloopFiles) {
-                AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots";
-                AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots_id41458";
-                AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots_id41459";
+                AO2DFiles.datarootsubfolder  = "v0-pt-inv-mass-plots_id66019";
+                AO2DFiles.mcrootsubfolder    = "v0-pt-inv-mass-plots_id66021";
+                AO2DFiles.mcgenrootsubfolder = "v0-pt-inv-mass-plots_id66022";
             }
             break;
     }
@@ -104,21 +104,37 @@ namespace pthistos
         "4.6","5.0","5.4","5.9","6.5","7.0","8.0","10.0","12.0","14.0",
         "16.0"
     };
-*/
+    std::vector<std::string> ptbinsK0sh =
+    {
+        "0.0","0.1","0.2","0.3","0.4","0.5","0.6","0.7","0.8","0.9",
+        "1.0","1.2","1.3","1.4","1.5","1.6","1.7","1.8","1.9",
+        "2.0","2.2","2.4","2.6","2.8","3.0","3.3","3.6","3.9","4.2",
+        "4.6","5.0","5.4","5.9","6.5","7.0","8.0","10.0","12.0","14.0",
+        "16.0"
+    };
+
+    //for pp14 start
+    std::vector<std::string> ptbinsK0sh =
+    {
+        "0.0","0.1","0.2","0.3","0.4","0.5","0.6","0.7","0.8","0.9",
+        "1.0", "1.1","1.2","1.3","1.4","1.5","1.6","1.7","1.8","1.9",
+        "2.0","2.2","2.4","2.6","2.8","3.0","3.3","3.6","3.9","4.2",
+        "4.6","5.0","5.4","5.9","6.5","7.0","8.0","10.0"
+    };
+        std::vector<std::string> ptbinslambda =
+    {
+        "0.4","0.6","0.8", "1.0","1.2","1.4","1.6","1.8","2.0",
+        "2.2","2.5","2.9","3.4","4.0","5.0","6.5","8.0","10.0"
+    };
+        */
+
+    //for pp24 end
     //this for ppref24
     std::vector<std::string> ptbinsK0sh =
     {
     "0.0","0.2","0.4","0.5","0.6","0.7","0.8","0.9","1.0","1.2","1.4","1.6","1.8","2.0",
     "2.3","2.6","2.9","3.2","3.4","3.7","4.0","4.5","5.5","6.5"
     };
-
-/*
-    std::vector<std::string> ptbinslambda =
-    {
-        "0.4","0.6","0.8","1.0","1.2","1.4","1.6","1.8","2.0",
-        "2.2","2.5","2.9","3.4","4.0","5.0","6.5","8.0","10.0"
-    };
-*/
 
     //this for ppref24
     std::vector<std::string> ptbinslambda =
@@ -127,8 +143,14 @@ namespace pthistos
     "2.3","2.6","2.9","3.2","3.4","3.7","4.0","4.5","5.5","6.5"
     };
 
+    //Default Binning:
+    //std::vector<std::string> ptbinsK0sh =
+    //{"0.0","0.15","0.3","0.45","0.6","0.75","0.9","1.05","1.2","1.35","1.5","1.65","1.8","1.95","2.1","2.25","2.4","2.55","2.7","2.85","3.0"};
+    //std::vector<std::string> ptbinslambda =
+    //{"0.0","0.15","0.3","0.45","0.6","0.75","0.9","1.05","1.2","1.35","1.5","1.65","1.8","1.95","2.1","2.25","2.4","2.55","2.7","2.85","3.0"};
 
-    std::vector<double> centBinsK0sh = {0, 1, 5, 10, 15, 20, 30, 40, 50, 70, 100};
+    //std::vector<double> centBinsK0sh = {0, 1, 5, 10, 15, 20, 30, 40, 50, 70, 100};
+    std::vector<double> centBinsK0sh = {0, 100};
     //std::vector<double> centBinsK0sh = {0, 50, 100};
     std::vector<double> centBinsLambda = {0, 1, 5, 10, 15, 20, 30, 40, 50, 70, 100};
     //std::vector<double> centBinsK0sh = {0, 100};
